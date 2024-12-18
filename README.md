@@ -26,11 +26,6 @@ distributed differential graph representation learning for malicious indicators 
 
         {command}: concat all strings
         
-        {user home directory}: {HOME} in environment
-
-        {container}
-
-        {TERM}
     
     - import_DNS (install_DNS):
 
