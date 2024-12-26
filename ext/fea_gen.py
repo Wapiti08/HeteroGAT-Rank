@@ -26,17 +26,8 @@ import numpy as np
 from collections import defaultdict
 import re
 from tqdm import tqdm
+from typing import List, Dict, Tuple
 
-
-ray.init()
-
-@ray.remote
-def _process_chunk(chunk: pd.DataFrame):
-    """Helper function to process a single chunk of the DataFrame."""
-    # define default data_path location
-    data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
-    extractor = FeatureExtractor(data_path )  
-    return extractor._node_edge_build(chunk)
 
 class FeatureExtractor:
     
@@ -44,179 +35,114 @@ class FeatureExtractor:
         self.df = pd.read_pickle(data_path)
         
 
-    def _split_chunks(self,):
+    def _split_chunks(self, default_split = 5) -> List[pd.DataFrame]:
         # Approximate memory per row (1 KB per row)
         rows_per_chunk = 500 * 1024 * 1024 // 1024
 
-        # Split into chunks based on rows and cores
-        num_chunks = min(64, len(self.df) // rows_per_chunk)
-        chunks = np.array_split(self.df, num_chunks)
+        # Calculate the number of chunks based on rows and cores
+        num_chunks = min(64, max(default_split, len(self.df) // rows_per_chunk))
+        # Ensure at least one chunk
+        print(f"Number of chunks: {num_chunks}")
 
+        # Split the DataFrame into chunks
+        chunks = np.array_split(self.df, num_chunks)
+        print(f"Number of rows in each chunk: {[len(chunk) for chunk in chunks]}")
         return chunks
 
+    @staticmethod
+    def _create_node(value: str, node_type: str, eco: str) -> Dict:
+        '''  Helper function to create a node '''
+        return {"value": value, "type": node_type, "eco": eco}
 
-    def _root_node(self, row: dict):
+    @staticmethod
+    def _create_edge(source: str, target: str, edge_type:str = "", value:str="") -> Dict:
+        ''' Helper function to create a node '''
+        return {"source": source, "target": target, "type": edge_type, "value":value}
+
+
+    def _root_node(self, row: dict) -> Dict:
         '''
         :param row: the iterate row from dataframe
         :param id: pre-assign node id
         '''
-        return {
-            'value': row['Name'] + '_' + row['Version'],
-            "type": 'Package_Name', 
-            "eco": row['Ecosystem'],
-        }
+        return self._create_node(value=f"{row['Name']}_{row['Version']}",
+                                 node_type="Package_Name",
+                                 eco=f"{row['Ecosystem']}")
 
-    def _file_nodes_edges(self, row: dict):
+    def _file_nodes_edges(self, row: dict) -> Tuple[List[Dict], List[Dict]]:
         ''' extract path and action entity from import/install_Files feature
         
         :return: list of nodes
         '''
         path_nodes, file_edges = [], []
         for feature in ['import_Files', 'install_Files']:
-            if len(row[feature]) != 0:
-                for entity_dict in row[feature]:
-                    path_nodes.append(
-                        {
-                        'value': entity_dict['Path'],
-                        'type': 'Path',
-                        }
+            entities = row.get(feature)
+            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
+                for entity in entities:
+                    path_node = self._create_node(value=entity["Path"], node_type="Path", eco=row["Ecosystem"])
+                    file_edge = self._create_edge(
+                        source=f"{row['Name']}_{row['Version']}",
+                        target=entity["Path"],
+                        edge_type="action",
+                        value="_".join(k for k, v in entity.items() if v is True),
                     )
 
-                    file_edges.append(
-                        {
-                        'source': row['Name'] + '_' + row['Version'] ,
-                        'target': entity_dict['Path'],
-                        'value': "_".join(key for key, value in entity_dict.items() if value is True),
-                        'type': 'action',
-                        
-                        }
-                    )
+                    path_nodes.append(path_node)
+                    file_edges.append(file_edge)
 
         return path_nodes, file_edges
 
-    def _socket_nodes_edges(self, row: dict):
+    def _socket_nodes_edges(self, row: dict) -> Tuple[List[Dict], List[Dict]]:
         ''' extract IP/Hostname/Port from import/install_Sockets
         
         '''
         nodes, edges = [], []
         # collect all values and filter out repeated values
-        ipaddr_list, hostnames_list, port_list = [], [], []
+        ip_list, host_list, port_list = set(), set(), set()
         for feature in ['import_Sockets', 'install_Sockets']:
-            if len(row[feature]) != 0:
-                for entity_dict in row[feature]:
-                    ipaddr_list.append(entity_dict['Address'])
-                    if len(entity_dict['Hostnames'])!=0:
-                        hostnames_list.extend(entity_dict['Hostnames'])
-                    port_list.append(entity_dict['Port'])
+            entities = row.get(feature)
+            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
+                for entity in entities:
+                    ip_list.add(entity.get("Address"))
+                    host_list.update(entity.get("Hostnames", []))
+                    port_list.add(entity.get("Port"))
 
         # filter out port with 0, address with '::1', blank hostname
-        ipaddr_list = list(set(ipaddr_list))
-        ipaddr_list.remove("::1")
-
-        hostnames_list = list(set(hostnames_list))
-
-        port_list = list(set(port_list))
-        port_list.remove(0)
-
+        ip_list.discard("::1")
+        port_list.discard(0)
         
-        # create nodes list spanning IP, hostname, port
-        # create edge list from root node to three types of leaf nodes
+        nodes.extend([self._create_node(ip, "IP", row["Ecosystem"]) for ip in ip_list])
+        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", ip) for ip in ip_list])
 
-        nodes.extend(
-                [
-                    {
-                        'value': IP,
-                        'type': 'Path',
-                    } for IP in ipaddr_list
-                ]
-            )
-    
-        edges.extend(
-            [
-                {
-                    'source': row['Name'] + '_' + row['Version'] ,
-                    'target': IP,
-                    'value': "",
-                    'type': '',
-                } for IP in ipaddr_list
-            ]
-        )
+        nodes.extend([self._create_node(host, "Hostname", row["Ecosystem"]) for host in host_list])
+        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", host) for host in host_list])
 
-        nodes.extend(
-            [
-                {
-                    'value': hostname,
-                    'type': 'Hostnames'
-
-                } for hostname in hostnames_list
-            ]
-        )
-
-        edges.extend(
-            [
-                {
-                    'source': row['Name'] + '_' + row['Version'] ,
-                    'target': hostname,
-                    'value': "",
-                    'type': '',
-                } for hostname in hostnames_list
-            ]
-        )
-
-        nodes.extend(
-            [
-                {
-                    'value': Port,
-                    'type': 'Port'
-
-                } for Port in port_list
-            ]
-        )
-
-        edges.extend(
-            [
-                {
-                    'source': row['Name'] + '_' + row['Version'] ,
-                    'target': Port,
-                    'value': "",
-                    'type': '',
-                } for Port in port_list
-            ]
-        )
-
+        nodes.extend([self._create_node(str(port), "Port", row["Ecosystem"]) for port in port_list])
+        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", str(port)) for port in port_list])
         
         return nodes, edges
 
 
-    def _cmd_node_edge(self, row: dict):
+    def _cmd_node_edge(self, row: dict) -> Tuple[List[Dict], List[Dict]]:
         ''' extract command (concatenated), user home directory, 
         contrainer, and term from import/install_Commands 
         '''
         nodes, edges = [], []
         for feature in ['import_Commands', 'install_Commands']:
-            if len(row[feature]) != 0:
-                for entity_dict in row[feature]:
-                    # add command
-                    concat_cmd = " ".join(cmd_string for cmd_string in entity_dict['Command'])
-                    nodes.append(
-                        {
-                            'value': concat_cmd,
-                            'type': "CMD",
-                        }
-                    )
-
-                    edges.append(
-                        {
-                            'source': row['Name'] + '_' + row['Version'] ,
-                            'target': concat_cmd,
-                            'value': "",
-                            'type': '',
-                        }
-                    )
-
+            entities = row.get(feature)
+            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
+                for entity in entities:
+                    cmd = " ".join(entity.get("Command", []))
+                    nodes.append(self._create_node(cmd, "CMD", row["Ecosystem"]))
+                    edges.append(self._create_edge(f"{row['Name']}_{row['Version']}", cmd))
         return nodes, edges
 
-    def _node_edge_build(self, chunk: pd.DataFrame ):
+    @staticmethod
+    def _remove_duplicates(items: List[Dict]) -> List[Dict]:
+        """Remove duplicate dictionaries from a list."""
+        return list({frozenset(item.items()): item for item in items}.values())
+
+    def _node_edge_build(self, chunk: pd.DataFrame ) -> Tuple[List[Dict], List[Dict]]:
         ''' extract nodes and  edges from different edges
         
         '''
@@ -236,13 +162,9 @@ class FeatureExtractor:
             nodes.extend(cmd_nodes)
             edges.extend(cmd_edges)
 
-        # remove repeated nodes and edges --- frozenset creates a hashable representation of dict
-        nodes = list({frozenset(node.items()): node for node in nodes}.values())
-        edges = list({frozenset(edge.items()): edge for edge in edges}.values())
-
-        return nodes, edges
+        return self._remove_duplicates(nodes), self._remove_duplicates(edges)
     
-    def _parall_process(self):
+    def _parall_process(self) -> Tuple[List[Dict], List[Dict]]:
         """
         Build knowledge graph in parallel using Ray.
         """
@@ -250,7 +172,7 @@ class FeatureExtractor:
         chunks = self._split_chunks()
 
         # Create references to process each chunk in parallel
-        futures = [_process_chunk.remote(chunk, self) for chunk in chunks]
+        futures = [_process_chunk.remote(chunk) for chunk in chunks]
 
         # Collect results from all chunks
         results = ray.get(futures)
@@ -263,12 +185,53 @@ class FeatureExtractor:
             all_nodes.extend(nodes)
             all_edges.extend(edges)
 
-        # Remove duplicate nodes and edges
-        all_nodes = list({frozenset(node.items()): node for node in all_nodes}.values())
-        all_edges = list({frozenset(edge.items()): edge for edge in all_edges}.values())
+        return self._remove_duplicates(all_nodes), self._remove_duplicates(all_edges)
 
-        return all_nodes, all_edges
 
+@ray.remote
+def _process_chunk(chunk: pd.DataFrame):
+    """Helper function to process a single chunk of the DataFrame."""
+    # define default data_path location
+    data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
+    extractor = FeatureExtractor(data_path)  
+    return extractor._node_edge_build(chunk)
+
+
+def main():
+    # Initialize Ray
+    ray.init(ignore_reinit_error=True)
+
+    # Define the path to the data file
+    data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
+
+    # Check if the data file exists
+    if not data_path.exists():
+        print(f"Data file not found at: {data_path}")
+        return
+
+    # Create an instance of FeatureExtractor
+    feature_extractor = FeatureExtractor(data_path)
+
+    # Test the parallel processing method
+    print("Starting parallel knowledge graph building...")
+    all_nodes, all_edges = feature_extractor._parall_process()
+
+    # Display a summary of the results
+    print(f"Total nodes generated: {len(all_nodes)}")
+    print(f"Total edges generated: {len(all_edges)}")
+
+    # Optional: Save the results to files for inspection
+    output_dir = Path.cwd().joinpath("output")
+    output_dir.mkdir(exist_ok=True)
+
+    pd.DataFrame(all_nodes).to_json(output_dir.joinpath("nodes.json"), orient="records", lines=True)
+    pd.DataFrame(all_edges).to_json(output_dir.joinpath("edges.json"), orient="records", lines=True)
+
+    print(f"Nodes and edges saved to: {output_dir}")
+
+    # Shutdown Ray
+    ray.shutdown()
 
 if __name__ == "__main__":
-    
+    main()
+
