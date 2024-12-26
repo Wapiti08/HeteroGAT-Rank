@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2024-12-26 16:31:47
+ * @ Modified time: 2024-12-26 17:19:04
  * @ Description: implement personalized pagerank with golang
  */
 
@@ -51,7 +51,23 @@ func (g *Graph) AddEdge(source, target string, edge Edge) {
 }
 
 // normalize the edge weights for each node
+func (g *Graph) normalizeWeights() {
+	// compute total weight for each source node
+	nodeTotal := make(map[string]float64)
 
+	for edge, weight := range g.Weights{
+		source := edge[0]
+		nodeTotal[source] += weight
+	}
+
+	// normalize weight
+	for edge := range g.Weights {
+		source := edge[0]
+		if nodeTotal[source] > 0 {
+			g.Weights[edge] /= nodeTotal[source]
+		}
+	}
+}
 
 
 // calculate similarity between two node attributes
