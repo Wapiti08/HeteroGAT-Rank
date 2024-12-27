@@ -1,10 +1,12 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2024-12-26 17:19:04
+ * @ Modified time: 2024-12-27 11:42:20
  * @ Description: implement personalized pagerank with golang
  */
 
 package model
+
+import "math"
 
 // Graph representation with edge weight
 type Graph struct {
@@ -69,12 +71,29 @@ func (g *Graph) normalizeWeights() {
 	}
 }
 
+// calculate cosine similarity between two node attributes with semantic embeddings
 
-// calculate similarity between two node attributes
+func CosineSimiliarity(vecA, vecB []float64) float64 {
+	if len(vecA) != len(vecB) {
+		panic("vectors must be the same length")
+	}
 
-// helper function to calculate common characters in two strings
+	var dotProduct, normA, normB float64
 
-// helper function to calculate the intersection of two lists
+	for i:= 0; i < len(vecA); i++ {
+		dotProduct += vecA[i] * vecB[i]
+		normA += vecA[i] * vecA[i]
+		normB += vecB[i] * vecB[i]
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+
+}
+
 
 // compute the PPR using semantic weights
 
