@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2024-12-27 11:42:20
+ * @ Modified time: 2024-12-27 12:09:28
  * @ Description: implement personalized pagerank with golang
  */
 
@@ -53,7 +53,7 @@ func (g *Graph) AddEdge(source, target string, edge Edge) {
 }
 
 // normalize the edge weights for each node
-func (g *Graph) normalizeWeights() {
+func (g *Graph) NormalizeWeights() {
 	// compute total weight for each source node
 	nodeTotal := make(map[string]float64)
 
@@ -96,4 +96,30 @@ func CosineSimiliarity(vecA, vecB []float64) float64 {
 
 
 // compute the PPR using semantic weights
+func PersonalizedPageRank(g *Graph, startNode string, alpha float64, maxIter int, tol float64) map[string]float64{
+	/*
+	:param startNode: the node starting to perform random walk (malicious node)
+	:param alpha: teleport possibility --- avoid leaf node without connection and self-loop node
+	:param maxIter: iteration times
+	:param tol: convergence condition
+	*/
 
+	// initialize ppr values
+
+	// initialize all nodes to 0
+
+	// start node gets all the initial probability
+
+	// perform iterations
+
+		// copy current PPR to prevPPR
+
+		// calculate new PPR values
+
+	
+	// wait for all Goroutines to finish
+
+	// check convergence
+
+
+}
