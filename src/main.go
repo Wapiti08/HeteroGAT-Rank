@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 16:00:03
- * @ Modified time: 2024-12-27 12:08:42
+ * @ Modified time: 2024-12-28 11:16:37
  * @ Description: find malicious indicator in small-scale subgraphs
  */
 
@@ -17,34 +17,26 @@ func main() {
 	g := &model.Graph{}
 
 	// Add nodes
-	g.AddNode("A", model.Node{Type: "Package_Name", Eco: "Eco1"})
-	g.AddNode("B", model.Node{Type: "Command", Eco: "Eco2"})
-	g.AddNode("C", model.Node{Type: "IP", Eco: "Eco3"})
+	g.AddNode("A", model.Node{Type: "Package_Name", Eco: "npm"})
+	g.AddNode("B", model.Node{Type: "Command", Eco: "pypi"})
+	g.AddNode("C", model.Node{Type: "IP", Eco: "ruby"})
 
 	// Add edges
 	g.AddEdge("A", "B", model.Edge{Value: "install", Type: "action"})
 	g.AddEdge("B", "C", model.Edge{Value: "resolve", Type: "DNS"})
 	g.AddEdge("C", "A", model.Edge{Value: "query", Type: "DNS"})
 
-	// Assign initial edge weights (e.g., based on semantic similarity)
-	g.Weights[[2]string{"A", "B"}] = 1.0
-	g.Weights[[2]string{"B", "C"}] = 1.0
-	g.Weights[[2]string{"C", "A"}] = 1.0
-
-	// Normalize weights
-	g.NormalizeWeights()
-
 	// Run Personalized PageRank
-	alpha := 0.15
-	maxIter := 100
-	tol := 1e-6
+	totalWalks := 10000
+	maxSteps := 5
+	numWorkers := 4
 	startNode := "A"
 
-	ppr := model.PersonalizedPageRank(g, startNode, alpha, maxIter, tol)
+	proximity := model.PixieRandomWalk(g, startNode, totalWalks, maxSteps, numWorkers)
 
-	// Print the results
-	fmt.Println("Personalized PageRank scores:")
-	for node, score := range ppr {
-		fmt.Printf("Node %s: %.4f\n", node, score)
+	// Print results
+	fmt.Println("Node Proximity Scores:")
+	for node, score := range proximity {
+		fmt.Printf("Node %s: %d\n", node, score)
 	}
 }
