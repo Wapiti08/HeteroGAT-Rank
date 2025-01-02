@@ -27,7 +27,7 @@ from collections import defaultdict
 import re
 from tqdm import tqdm
 from typing import List, Dict, Tuple
-
+import pickle
 
 class FeatureExtractor:
     
@@ -142,13 +142,13 @@ class FeatureExtractor:
         """Remove duplicate dictionaries from a list."""
         return list({frozenset(item.items()): item for item in items}.values())
 
-    def _node_edge_build(self, chunk: pd.DataFrame ) -> Tuple[List[Dict], List[Dict]]:
+    def _construct_subgraph(self, label:str, rows: pd.DataFrame ) -> Dict:
         ''' extract nodes and  edges from different edges
         
         '''
         nodes = []
         edges = []
-        for index, row in tqdm(chunk.iterrows(), desc='create edges from chunk', total=len(chunk)):
+        for index, row in tqdm(rows.iterrows(), desc='create edges from chunk', total=len(rows)):
             nodes.append(self._root_node(row))
             file_nodes, file_edges = self._file_nodes_edges(row)
             nodes.extend(file_nodes)
@@ -162,39 +162,34 @@ class FeatureExtractor:
             nodes.extend(cmd_nodes)
             edges.extend(cmd_edges)
 
-        return self._remove_duplicates(nodes), self._remove_duplicates(edges)
-    
-    def _parall_process(self) -> Tuple[List[Dict], List[Dict]]:
+        nodes, edges = self._remove_duplicates(nodes), self._remove_duplicates(edges)
+
+        return {'label': label, "nodes": nodes, "edges": edges}
+
+    def _group_by_label(self) -> Dict[str, pd.DataFrame]:
+        return {label: group for label, group in self.df.groupby("Label")}
+
+    def _parall_process(self) -> List[Dict]:
         """
         Build knowledge graph in parallel using Ray.
         """
-        # Split the dataframe into chunks
-        chunks = self._split_chunks()
+        label_groups = self._group_by_label()
 
         # Create references to process each chunk in parallel
-        futures = [_process_chunk.remote(chunk) for chunk in chunks]
+        futures = [_process_label.remote(label, rows) for label, rows in label_groups.items()]
 
         # Collect results from all chunks
         results = ray.get(futures)
 
-        # Aggregate nodes and edges across all chunks
-        all_nodes = []
-        all_edges = []
-
-        for nodes, edges in results:
-            all_nodes.extend(nodes)
-            all_edges.extend(edges)
-
-        return self._remove_duplicates(all_nodes), self._remove_duplicates(all_edges)
-
+        return results
 
 @ray.remote
-def _process_chunk(chunk: pd.DataFrame):
+def _process_label(label: str, rows: pd.DataFrame) -> Dict:
     """Helper function to process a single chunk of the DataFrame."""
     # define default data_path location
     data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
     extractor = FeatureExtractor(data_path)  
-    return extractor._node_edge_build(chunk)
+    return extractor._construct_subgraph(label, rows)
 
 
 def main():
@@ -213,21 +208,26 @@ def main():
     feature_extractor = FeatureExtractor(data_path)
 
     # Test the parallel processing method
-    print("Starting parallel knowledge graph building...")
-    all_nodes, all_edges = feature_extractor._parall_process()
+    print("Starting parallel labeled subgraph construction...")
+    subgraphs = feature_extractor._parall_process()
 
     # Display a summary of the results
-    print(f"Total nodes generated: {len(all_nodes)}")
-    print(f"Total edges generated: {len(all_edges)}")
+    print(f"Total subgraphs constructed: {len(subgraphs)}")
+    for subgraph in subgraphs:
+        print(f"Label: {subgraph['label']}, Nodes: {len(subgraph['nodes'])}, Edges: {len(subgraph['edges'])}")
+
 
     # Optional: Save the results to files for inspection
     output_dir = Path.cwd().joinpath("output")
     output_dir.mkdir(exist_ok=True)
 
-    pd.DataFrame(all_nodes).to_json(output_dir.joinpath("nodes.json"), orient="records", lines=True)
-    pd.DataFrame(all_edges).to_json(output_dir.joinpath("edges.json"), orient="records", lines=True)
+    # Save all subgraphs to a single pickle file
+    pickle_file_path = output_dir.joinpath("subgraphs.pkl")
 
-    print(f"Nodes and edges saved to: {output_dir}")
+    with open(pickle_file_path, "wb") as f:
+        pickle.dump(subgraphs, f)
+
+    print(f"All subgraphs saved to: {pickle_file_path}")
 
     # Shutdown Ray
     ray.shutdown()
