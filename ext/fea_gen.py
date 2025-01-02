@@ -142,54 +142,53 @@ class FeatureExtractor:
         """Remove duplicate dictionaries from a list."""
         return list({frozenset(item.items()): item for item in items}.values())
 
-    def _construct_subgraph(self, label:str, rows: pd.DataFrame ) -> Dict:
+    def _construct_subgraph(self, row: dict ) -> Dict:
         ''' extract nodes and  edges from different edges
         
         '''
         nodes = []
         edges = []
-        for index, row in tqdm(rows.iterrows(), desc='create edges from chunk', total=len(rows)):
-            nodes.append(self._root_node(row))
-            file_nodes, file_edges = self._file_nodes_edges(row)
-            nodes.extend(file_nodes)
-            edges.extend(file_edges)
 
-            socket_nodes, socket_edges = self._socket_nodes_edges(row)
-            nodes.extend(socket_nodes)
-            edges.extend(socket_edges)
+        nodes.append(self._root_node(row))
+        file_nodes, file_edges = self._file_nodes_edges(row)
+        nodes.extend(file_nodes)
+        edges.extend(file_edges)
 
-            cmd_nodes, cmd_edges = self._cmd_node_edge(row)
-            nodes.extend(cmd_nodes)
-            edges.extend(cmd_edges)
+        socket_nodes, socket_edges = self._socket_nodes_edges(row)
+        nodes.extend(socket_nodes)
+        edges.extend(socket_edges)
+
+        cmd_nodes, cmd_edges = self._cmd_node_edge(row)
+        nodes.extend(cmd_nodes)
+        edges.extend(cmd_edges)
 
         nodes, edges = self._remove_duplicates(nodes), self._remove_duplicates(edges)
 
-        return {'label': label, "nodes": nodes, "edges": edges}
+        return {'label': row.get("Label"), "nodes": nodes, "edges": edges}
 
-    def _group_by_label(self) -> Dict[str, pd.DataFrame]:
-        return {label: group for label, group in self.df.groupby("Label")}
 
-    def _parall_process(self) -> List[Dict]:
+    def _parall_process_rows(self) -> List[Dict]:
         """
         Build knowledge graph in parallel using Ray.
         """
-        label_groups = self._group_by_label()
-
+        chunks = self._split_chunks()
         # Create references to process each chunk in parallel
-        futures = [_process_label.remote(label, rows) for label, rows in label_groups.items()]
+        futures = [_process_chunk.remote(chunk) for chunk in chunks]
 
         # Collect results from all chunks
-        results = ray.get(futures)
+        chunk_results = ray.get(futures)
+        # Flatten the list of lists into a single list
+        results = [subgraph for chunk in chunk_results for subgraph in chunk]
 
         return results
 
 @ray.remote
-def _process_label(label: str, rows: pd.DataFrame) -> Dict:
+def _process_chunk(chunk: dict) -> Dict:
     """Helper function to process a single chunk of the DataFrame."""
     # define default data_path location
     data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
     extractor = FeatureExtractor(data_path)  
-    return extractor._construct_subgraph(label, rows)
+    return [extractor._construct_subgraph(row) for _, row in chunk.iterrows()]
 
 
 def main():
@@ -209,12 +208,12 @@ def main():
 
     # Test the parallel processing method
     print("Starting parallel labeled subgraph construction...")
-    subgraphs = feature_extractor._parall_process()
+    subgraphs = feature_extractor._parall_process_rows()
 
     # Display a summary of the results
     print(f"Total subgraphs constructed: {len(subgraphs)}")
-    for subgraph in subgraphs:
-        print(f"Label: {subgraph['label']}, Nodes: {len(subgraph['nodes'])}, Edges: {len(subgraph['edges'])}")
+    for i, subgraph in enumerate(subgraphs[:5]):  # Show first 5 for brevity
+        print(f"Subgraph {i}: Label: {subgraph['label']}, Nodes: {len(subgraph['nodes'])}, Edges: {len(subgraph['edges'])}")
 
 
     # Optional: Save the results to files for inspection
