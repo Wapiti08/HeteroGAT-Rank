@@ -6,8 +6,7 @@
  node: {
     'value': str value,
     "type": Path | Package_Name | IP | Hostname | Port | 
-        Command | User Home Directory | Container | TERM |
-    "eco": 
+        Command 
  }
 
  edge: {
@@ -68,6 +67,41 @@ class FeatureExtractor:
         return self._create_node(value=f"{row['Name']}_{row['Version']}",
                                  node_type="Package_Name",
                                  eco=f"{row['Ecosystem']}")
+
+    def _dns_nodes_edges(self, row: dict) -> Tuple[List[Dict], List[Dict]]:
+        ''' extract hostname as nodes and concatenated types as edges
+        
+        '''
+        hostname_nodes, type_edges = [], []
+        for feature in ['import_DNS', 'install_DNS']:
+            entities = row.get(feature)
+            # check whether entities are not blank
+            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
+                for entity in entities:
+                    queries = entity.get("Queries", [])
+
+                    # ensure queries is iterable and contains valid data
+                    if isinstance(queries, (list, np.ndarray)) and len(queries) >0:
+                        for query in queries:
+                            hostname = query.get("Hostname")
+                            types = query.get("Types", [])
+                        
+                            if hostname:
+                                # Create and add unique node
+                                if hostname not in [node["value"] for node in hostname_nodes]:
+                                    hostname_nodes.append(self._create_node(hostname, "DNS Host", row["Ecosystem"]))
+                                
+                                # Create and add edge with concatenated DNS types
+                                if isinstance(types, (list, np.ndarray)) and len(types) > 0:
+                                    concatenated_types = "_".join(types)
+                                    type_edges.append(self._create_edge(
+                                        source=f"{row['Name']}_{row['Version']}",
+                                        target=hostname, 
+                                        edge_type="DNS Types",
+                                        value=concatenated_types
+                                    ))
+
+        return hostname_nodes, type_edges
 
     def _file_nodes_edges(self, row: dict) -> Tuple[List[Dict], List[Dict]]:
         ''' extract path and action entity from import/install_Files feature
@@ -150,6 +184,11 @@ class FeatureExtractor:
         edges = []
 
         nodes.append(self._root_node(row))
+
+        dns_nodes, dns_edges = self._dns_nodes_edges(row)
+        nodes.extend(dns_nodes)
+        edges.extend(dns_edges)
+
         file_nodes, file_edges = self._file_nodes_edges(row)
         nodes.extend(file_nodes)
         edges.extend(file_edges)
