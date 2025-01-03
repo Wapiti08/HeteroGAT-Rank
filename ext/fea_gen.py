@@ -183,7 +183,7 @@ class FeatureExtractor:
         return results
 
 @ray.remote
-def _process_chunk(chunk: dict) -> Dict:
+def _process_chunk(chunk: pd.DataFrame) -> List[Dict]:
     """Helper function to process a single chunk of the DataFrame."""
     # define default data_path location
     data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
