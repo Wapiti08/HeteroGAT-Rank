@@ -57,10 +57,29 @@ def process_subgraphs(subgraph_batch, seq_encoder, cate_encoder, iden_encoder):
                 encoded_value = seq_encoder(pd.DataFrame([row['value']]))
 
             node_features.append(encoded_value)
-        
-         
+        # concat like a batch
+        node_features = torch.cat(node_features, dim=0)
+        node_types = cate_encoder(node_df['type'])
+        node_eco = cate_encoder(node_df['eco'])
 
+        # apply encoders to edge attributes
+        edge_sources = seq_encoder(edge_df['source'])
+        edge_targets = seq_encoder(edge_df['target'])
+        edge_values = seq_encoder(edge_df['value'])
+        edge_types = cate_encoder(edge_df['type'])
 
+        # construct a data object
+        data = Data(
+            x = torch.cat([node_features, node_types, node_eco], dim=1),
+            edge_index = torch.tensor([edge_sources, edge_targets], dtype=torch.long),
+            edge_attr = torch.cat([edge_values, edge_types], dim=1),
+            y = torch.tensor(label, dtype=torch.long)
+        )
+
+        data_list.append(data)
+    
+    # create a batched data object
+    return Batch.from_data_list(data_list)
 
 
 
@@ -91,6 +110,9 @@ class LabeledSubGraphs(Dataset):
     @property
     def processed_file_names(self):
         # generate a list of filenames for processed files
+        if not osp.exists(self.processed_dir):
+            return []
+        return [f'batch_{i}.pt' for i in range(len(os.listdir(self.processed_dir)))]
 
 
     def download(self):
@@ -102,30 +124,36 @@ class LabeledSubGraphs(Dataset):
 
     def process(self):
         # load the raw data
+        raw_path = osp.join(self.raw_dir, "subgraphs.pkl")
+        with open(raw_path, 'rb') as fr:
+            subgraphs = pickle.load(fr)
 
-
-        # process every subgraph within loop
-
-            # construct node features
-
-                # apply different encoding method 
+        # convert to pandas framework for easier processing
+        subgraphs_df = pd.DataFrame(subgraphs)
         
+        # split into batches
+        num_batches = len(subgraphs_df) // self.batch_size + 1
+        subgraph_batches = [
+            subgraphs_df.iloc[i * self.batch_size: (i+1) * self.batch_size].to_dict(orient='records')
+            for i in range(num_batches)
+        ]
 
-                # concatenate node features
 
-            # construct edge index and attributes
-        
+        # process batches in parallel
+        ray.init()
 
-            # create the data object
-        
-            # apply filtering and transforms
-        
-            # add to batch
-        
-            # save the batch when full
-        
-        # save any remaining data
-    
+        try:
+            tasks = [
+                process_subgraphs.remote(batch, self.seq_encoder, self.cate_encoder)
+                for batch in subgraph_batches
+            ]
+            results = ray.get(tasks)    
+        finally:
+            ray.shutdown()
+
+        # save the processed batches
+        for i, batch in enumerate(results):
+            torch.save(batch, osp.join(self.processed_dir, f'batch_{i}.pt'))
 
     def len(self):
         return len(self.processed_file_names)
