@@ -9,9 +9,14 @@ from torch_geometric.nn import HeteroConv, GATConv
 from torch_geometric import nn
 
 class MaskedHeteroGAT(torch.nn.Module):
-    def __init__(self,):
+    def __init__(self, metadata, hidden_channels, out_channels, num_heads, num_edges, num_nodes):
         super(MaskedHeteroGAT, self).__init__()
-        self.conv1 = 
+    
+        # learnable masks
+        self. = 
+        self.
+    
+
 
 
 
@@ -25,13 +30,12 @@ class HeteroGAT(torch.nn.Module):
         # define first layer
         self.conv1 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1，1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，1), hidden_channels, heads=num_heads),
-
+                ('Package_Name', 'Action', 'Path'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'CMD', 'Command'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'IP'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Port'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1，-1), hidden_channels, heads=num_heads),
             },
             aggr='mean',
         )
@@ -39,7 +43,12 @@ class HeteroGAT(torch.nn.Module):
         # define second layer
         self.conv2 = HeteroConv(
             {
-                ()
+                ('Package_Name', 'Action', 'Path'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'CMD', 'Command'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'IP'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Port'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1，-1), hidden_channels, heads=num_heads),
             },
             aggr='mean',
         )
@@ -49,6 +58,16 @@ class HeteroGAT(torch.nn.Module):
 
     def forward(self, x_dict, edge_index_dict):
         '''
-        :param x_dict:
-        :param edge_index_dict: 
+        :param x_dict: a dict holding node feature informaiton for each individual node type
+        :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
         '''
+        x_dict = self.conv1(x_dict, edge_index_dict)
+        x_dict = {key: torch.relu(x) for key, x in x_dict.items()}
+        x_dict = self.conv2(x_dict, edge_index_dict)
+
+        # project to logits for classification
+        logit_dict = {
+            key: self.classifier(x).squeeze(-1) for key, x in x_dict.items()
+        }
+
+        return logit_dict
