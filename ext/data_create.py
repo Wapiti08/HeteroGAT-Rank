@@ -3,9 +3,9 @@
  # @ Modified time: 2024-12-18 09:27:14
  # @ Description: create graph dataset suitable for GNN model training in pytorch
  
-  node: {
+node: {
     'value': str content / numeric,
-    "type": Path | Package_Name | IP | Hostname | Command | Port --- str content
+    "type": Package_Name | Path | IP | Hostname | Hostnames | Command | Port --- str content
     "eco": cate
  }
 
@@ -13,7 +13,7 @@
     "source": str content,
     "target": str content,
     "value": str content,
-    "type": action | DNS types
+    "type": action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
  }
  
  
@@ -25,7 +25,7 @@ from ext import encoder
 import os
 import os.path as osp
 import torch
-from torch_geometric.data import Data, Dataset, Batch
+from torch_geometric.data import HeteroData, Dataset, Batch
 import pickle
 import pandas as pd
 
@@ -45,42 +45,38 @@ def process_subgraphs(subgraph_batch, seq_encoder, cate_encoder, iden_encoder):
         node_df = pd.DataFrame(nodes)
         edge_df = pd.DataFrame(edges)
 
-        # apply encoders to node attributes
-        node_features = []
+        # initialize heterodata
+        hetero_data = HeteroData()
 
-        for idx, row in node_df.iterrows():
-            if row['type'] == 'Port':
-                # numeric encoding for Ports
-                encoded_value = iden_encoder(pd.DataFrame([row['value']]))
+        # process nodes
+        for node_type in node_df['type'].unique():
+            type_nodes = node_df[node_df['type']==node_type]
+            if node_type == 'Port':
+                features = iden_encoder(type_nodes[['value']])
             else:
-                # sequence encoding for non-numeric values
-                encoded_value = seq_encoder(pd.DataFrame([row['value']]))
+                features = seq_encoder(type_nodes[['value']])
+            hetero_data['node'].x = features
+            # comment it for second-stage exploration
+            # hetero_data['node'].eco = cate_encoder(type_nodes[['eco']])
 
-            node_features.append(encoded_value)
-        # concat like a batch
-        node_features = torch.cat(node_features, dim=0)
-        node_types = cate_encoder(node_df['type'])
-        node_eco = cate_encoder(node_df['eco'])
+        # process edges
+        for edge_type in edge_df['type'].unique():
+            type_edges = edge_df[edge_df['type'] == edge_type]
+            sources = seq_encoder(type_edges[['source']])
+            targets = seq_encoder(type_edges[['target']])
+            edge_values = seq_encoder(type_edges[['value']])
+            hetero_data[edge_type].edge_index = torch.tensor(
+                [sources, targets], dtype=torch.long
+            )
+            hetero_data[edge_type].edge_attr = edge_values
 
-        # apply encoders to edge attributes
-        edge_sources = seq_encoder(edge_df['source'])
-        edge_targets = seq_encoder(edge_df['target'])
-        edge_values = seq_encoder(edge_df['value'])
-        edge_types = cate_encoder(edge_df['type'])
+        # add labels
+        hetero_data['label'] = torch.tensor(label, dtype=torch.long)
 
-        # construct a data object
-        data = Data(
-            x = torch.cat([node_features, node_types, node_eco], dim=1),
-            edge_index = torch.tensor([edge_sources, edge_targets], dtype=torch.long),
-            edge_attr = torch.cat([edge_values, edge_types], dim=1),
-            y = torch.tensor(label, dtype=torch.long)
-        )
-
-        data_list.append(data)
+        data_list.append(hetero_data)
     
     # create a batched data object
     return Batch.from_data_list(data_list)
-
 
 
 class LabeledSubGraphs(Dataset):

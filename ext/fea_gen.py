@@ -4,16 +4,17 @@
  # @ Description: create graph representation from labeled dataset
  
  node: {
-    'value': str value,
-    "type": Path | Package_Name | IP | Hostname | Port | 
-        Command 
- }
+    'value': str value / numeric
+    "type": Package_Name | Path | IP | Hostname | Hostnames | Command | Port --- str content
+    "eco": cate
+     }
 
  edge: {
     "source": x,
     "target": y,
-    "value": str | list value,
-    "type": action | DNS types
+    "value": str,
+    "type": action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
+
  }
  
  
@@ -97,7 +98,7 @@ class FeatureExtractor:
                                     type_edges.append(self._create_edge(
                                         source=f"{row['Name']}_{row['Version']}",
                                         target=hostname, 
-                                        edge_type="DNS Types",
+                                        edge_type="DNS",
                                         value=concatenated_types
                                     ))
 
@@ -141,18 +142,24 @@ class FeatureExtractor:
                     host_list.update(entity.get("Hostnames", []))
                     port_list.add(entity.get("Port"))
 
+        default_edge_type = "socket"
+        default_edge_value = "access"
+
         # filter out port with 0, address with '::1', blank hostname
         ip_list.discard("::1")
         port_list.discard(0)
         
         nodes.extend([self._create_node(ip, "IP", row["Ecosystem"]) for ip in ip_list])
-        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", ip) for ip in ip_list])
+        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", ip, \
+                                        default_edge_type, default_edge_value) for ip in ip_list])
 
         nodes.extend([self._create_node(host, "Hostname", row["Ecosystem"]) for host in host_list])
-        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", host) for host in host_list])
+        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", host, \
+                                        default_edge_type, default_edge_value) for host in host_list])
 
         nodes.extend([self._create_node(str(port), "Port", row["Ecosystem"]) for port in port_list])
-        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", str(port)) for port in port_list])
+        edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", port, \
+                                        default_edge_type, default_edge_value) for port in port_list])
         
         return nodes, edges
 
@@ -161,6 +168,9 @@ class FeatureExtractor:
         ''' extract command (concatenated), user home directory, 
         contrainer, and term from import/install_Commands 
         '''
+        default_edge_type = "CMD"
+        default_edge_value = "execute"
+
         nodes, edges = [], []
         for feature in ['import_Commands', 'install_Commands']:
             entities = row.get(feature)
@@ -168,7 +178,8 @@ class FeatureExtractor:
                 for entity in entities:
                     cmd = " ".join(entity.get("Command", []))
                     nodes.append(self._create_node(cmd, "CMD", row["Ecosystem"]))
-                    edges.append(self._create_edge(f"{row['Name']}_{row['Version']}", cmd))
+                    edges.append(self._create_edge(f"{row['Name']}_{row['Version']}", cmd, \
+                                                   default_edge_type, default_edge_value))
         return nodes, edges
 
     @staticmethod
