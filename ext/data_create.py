@@ -16,8 +16,6 @@ node: {
     "type": action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
  }
  
- 
- 
  '''
 
 import ray
