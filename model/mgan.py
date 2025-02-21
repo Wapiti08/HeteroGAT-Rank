@@ -147,6 +147,19 @@ class MaskedHeteroGAT(torch.nn.Module):
         ranked_indicies = torch.argsort(att_values, descending=True)
         return att_values[rank_indicies]
 
+    def compute_loss(self, probs, labels):
+        ''' compute the total loss, including BCE loss and regularization
+
+        :param probs: model output probabilities (after sigmoid activation)
+        :param labels: ground truth binary labels
+        :return: total loss (BCE loss + regularization)
+
+        '''
+        bce_loss = F.binary_cross_entropy(probs, labels.float())
+        reg_loss = mask_regularization(self.edge_mask, self.node_mask)
+
+        return bce_loss + reg_loss
+
 # regularization term to encourage sparsity
 def mask_regularization(edge_mask, node_mask, lambda_reg=0.01):
     return lambda_reg * (torch.sum(torch.abs(edge_mask)) + torch.sum(torch.abs(node_mask)))
@@ -204,7 +217,46 @@ class HeteroGAT(torch.nn.Module):
 
         return logit_dict
     
-    def compute_loss(self,  )
-    
+    def compute_loss(self, logic_dict, y_dict):
+        ''' computer the binary classification loss
 
-    def train_model(self, )
+        :param logic_dict: dictionary of logits for each node type
+        :param x_dictL the dictionary of ground truth labels for each node type
+        
+        return: total loss across all node types
+        '''
+        loss = 0
+        for node_type in logic_dict:
+            if node_type in y_dict:
+                y_pred = logic_dict[node_type]
+                y_true = y_dict[node_type].float()
+                loss += self.loss_fn(y_pred, y_true)
+
+        return loss
+
+    def train_model(self, x_dict, edge_index_dict, y_dict, optimizer, num_epochs=100):
+        ''' train model and print performance
+        Args:
+            x_dict: Node features.
+            edge_index_dict: Edge indices for each edge type.
+            y_dict: Ground truth labels.
+            optimizer: Optimizer for the model.
+            num_epochs: Number of training epochs.
+
+        '''
+        # loop in epochs
+        for epoch in range(num_epochs):
+            self.train()
+            optimizer.zero_grad()
+
+            # forward pass
+            logic_dict = self.forward(x_dict, edge_index_dict)
+
+            # compute loss
+            loss = self.compute_loss(logic_dict, y_dict)
+
+            # backward pass and optimization
+            loss.backward()
+            optimizer.step()
+
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}")
