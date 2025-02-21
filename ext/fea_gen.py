@@ -13,7 +13,7 @@
     "source": x,
     "target": y,
     "value": str,
-    "type": action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
+    "type": Action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
 
  }
  
@@ -118,7 +118,7 @@ class FeatureExtractor:
                     file_edge = self._create_edge(
                         source=f"{row['Name']}_{row['Version']}",
                         target=entity["Path"],
-                        edge_type="action",
+                        edge_type="Action",
                         value="_".join(k for k, v in entity.items() if v is True),
                     )
 
