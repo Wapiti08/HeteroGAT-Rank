@@ -1,4 +1,7 @@
 ray==2.40.0
 scikit-learn==1.6.0
 dask==2023.5.0
-torch_geometric==2.6.1
+torch-geometric==2.6.1
+pandas==2.2.3
+tqdm==4.67.1
+sentence-transformers==3.4.1

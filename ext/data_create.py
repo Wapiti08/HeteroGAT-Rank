@@ -18,6 +18,9 @@ node: {
  
  '''
 
+import sys
+from pathlib import Path
+sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import ray
 from ext import encoder
 import os
@@ -26,13 +29,19 @@ import torch
 from torch_geometric.data import HeteroData, Dataset, Batch
 import pickle
 import pandas as pd
+from pathlib import Path
+import pickle
 
 
 @ray.remote
-def process_subgraphs(subgraph_batch, seq_encoder, cate_encoder, iden_encoder):
+def process_subgraphs(subgraph_batch):
     '''
     process a batch of subgraphs and return a batched data object
     '''
+
+    seq_encoder = encoder.SequenceEncoder()
+    iden_encoder = encoder.IdentityEncoder(dtype=torch.float)
+
     data_list = []
     for subgraph in subgraph_batch:
         # encode nodes and edges
@@ -91,14 +100,12 @@ class LabeledSubGraphs(Dataset):
         super().__init__(root, transform, pre_transform, pre_filter)
 
         # initialize encoders for node/edge attributes
-        self.StrEncoder = encoder.SequenceEncoder()
-        self.CateEncoder = encoder.CateEncoder()
-        self.NumEncoder = encoder.IdentityEncoder(dtype=torch.float)
+        # self.seq_encoder = encoder.SequenceEncoder()
+        # self.iden_encoder = encoder.IdentityEncoder(dtype=torch.float)
 
 
     @property
     def raw_file_names(self):
-
         return ['subgraphs.pkl']
     
     @property
@@ -110,10 +117,10 @@ class LabeledSubGraphs(Dataset):
 
 
     def download(self):
-        ''' if the raw data needs to be downloaded, impplement it here
+        ''' if the raw data needs to be downloaded, implement it here
         
         '''
-        raise NotImplementedError("Please provide the raw data manually.")
+        pass
 
 
     def process(self):
@@ -132,13 +139,14 @@ class LabeledSubGraphs(Dataset):
             for i in range(num_batches)
         ]
 
-
         # process batches in parallel
-        ray.init()
+        ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
+                              "excludes": ["logs/", "*.pkl", "*.pt", "*.json"]})
 
         try:
             tasks = [
-                process_subgraphs.remote(batch, self.seq_encoder, self.cate_encoder)
+                # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
+                process_subgraphs.remote(batch)
                 for batch in subgraph_batches
             ]
             results = ray.get(tasks)    
@@ -155,4 +163,26 @@ class LabeledSubGraphs(Dataset):
     def get(self, idx):
         batch = torch.load(osp.join(self.processed_dir, f'batch_{idx}.pt'))
         return batch
+
+
+if __name__ == "__main__":
+    # load pickle format of graph dataset with graph representations
+    data_path = Path.cwd().joinpath("output")
+
+    # create an instance of the dataset
+    dataset = LabeledSubGraphs(root=data_path, batch_size=100)
+
+    # access the length of dataset
+    print(f"Dataset length: {len(dataset)}")
+
+    # get a processed batch
+    batch_idx = 0
+    if batch_idx < len(dataset):
+        batch_data = dataset.get(batch_idx)
+        print(f"loaded batch {batch_idx} with {len(batch_data)} subgraphs")
+    else:
+        print("Batch index out of range")
+
+    
+    
 

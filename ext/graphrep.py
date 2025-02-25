@@ -1,7 +1,7 @@
 '''
  # @ Create Time: 2024-12-16 18:27:17
  # @ Modified time: 2024-12-16 18:27:30
- # @ Description: create graph representation from labeled dataset
+ # @ Description: create graph representation from labeled dataset (csv -> pkl)
  
  node: {
     'value': str value / numeric
@@ -267,7 +267,7 @@ def main():
 
 
     # Optional: Save the results to files for inspection
-    output_dir = Path.cwd().joinpath("output")
+    output_dir = Path.cwd().joinpath("output","raw")
     output_dir.mkdir(exist_ok=True)
 
     # Save all subgraphs to a single pickle file
