@@ -31,7 +31,7 @@ import pickle
 import pandas as pd
 from pathlib import Path
 import pickle
-
+import numpy as np
 
 @ray.remote
 def process_subgraphs(subgraph_batch):
@@ -58,7 +58,13 @@ def process_subgraphs(subgraph_batch):
         # process nodes
         for node_type in node_df['type'].unique():
             type_nodes = node_df[node_df['type']==node_type]
+            if type_nodes.empty:
+                continue
+
             if node_type == 'Port':
+                # ensure the value is numeric
+                type_nodes['value'] = pd.to_numeric(type_nodes['value'], errors='coerce').fillna(0)
+
                 features = iden_encoder(type_nodes[['value']])
             else:
                 features = seq_encoder(type_nodes[['value']])
@@ -69,12 +75,18 @@ def process_subgraphs(subgraph_batch):
         # process edges
         for edge_type in edge_df['type'].unique():
             type_edges = edge_df[edge_df['type'] == edge_type]
-            sources = seq_encoder(type_edges[['source']])
-            targets = seq_encoder(type_edges[['target']])
+            
+            sources = seq_encoder(type_edges[['source']].astype(str))
+            targets = seq_encoder(type_edges[['target']].astype(str))
+            
+
+            sources = torch.as_tensor(sources, dtype=torch.long).view(1, -1)
+            targets = torch.as_tensor(targets, dtype=torch.long).view(1, -1)
+            # ensure the shape is (2,N)
+            hetero_data[edge_type].edge_index = torch.cat([sources, targets], dim=0)
+
             edge_values = seq_encoder(type_edges[['value']])
-            hetero_data[edge_type].edge_index = torch.tensor(
-                [sources, targets], dtype=torch.long
-            )
+
             hetero_data[edge_type].edge_attr = edge_values
 
         # add labels
@@ -88,7 +100,7 @@ def process_subgraphs(subgraph_batch):
 
 class LabeledSubGraphs(Dataset):
     
-    def __init__(self, root, batch_size=100, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, batch_size=10, transform=None, pre_transform=None, pre_filter=None):
         '''
         :param root: root directory where the dataset is stored
         :param batch_size: number of subgraphs to store in a single file
@@ -97,6 +109,7 @@ class LabeledSubGraphs(Dataset):
         :param pre_filter: a function to filter data objects
         '''
         self.batch_size = batch_size
+        self.data_path = root
         super().__init__(root, transform, pre_transform, pre_filter)
 
         # initialize encoders for node/edge attributes
@@ -124,8 +137,9 @@ class LabeledSubGraphs(Dataset):
 
 
     def process(self):
-        # load the raw data
-        raw_path = osp.join(self.raw_dir, "subgraphs.pkl")
+        # load the raw data --- non-packaged directory to avoid large size package to Ray
+        raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
+                             "subgraphs.pkl")
         with open(raw_path, 'rb') as fr:
             subgraphs = pickle.load(fr)
 
@@ -141,7 +155,7 @@ class LabeledSubGraphs(Dataset):
 
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
-                              "excludes": ["logs/", "*.pkl", "*.pt", "*.json"]})
+                              "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
 
         try:
             tasks = [
@@ -170,7 +184,7 @@ if __name__ == "__main__":
     data_path = Path.cwd().joinpath("output")
 
     # create an instance of the dataset
-    dataset = LabeledSubGraphs(root=data_path, batch_size=100)
+    dataset = LabeledSubGraphs(root=data_path, batch_size=10)
 
     # access the length of dataset
     print(f"Dataset length: {len(dataset)}")

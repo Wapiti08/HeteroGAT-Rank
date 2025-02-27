@@ -18,8 +18,14 @@ class SequenceEncoder:
 
     @torch.no_grad()
     def __call__(self, df):
-        x = self.model.encode(df.values, show_progress_bar=True,
-                              convert_to_tensor=True, device=self.device)
+        values = df.values.flatten().tolist()
+        # process when value length is only one
+        if len(values) == 1:
+            x = self.model.encode(values[0],  show_progress_bar=False,
+                              convert_to_tensor=True, device=self.device).unsqueeze(0)
+        else:
+            x = self.model.encode(values, show_progress_bar=True,
+                                convert_to_tensor=True, device=self.device)
 
         return x.cpu()
 
