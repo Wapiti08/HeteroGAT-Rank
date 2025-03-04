@@ -6,6 +6,9 @@
  '''
 from sentence_transformers import SentenceTransformer
 import torch
+import pandas as pd
+import torch.nn.functional as F
+
 
 
 class SequenceEncoder:
@@ -15,10 +18,16 @@ class SequenceEncoder:
     def __init__(self, model_name='all-MiniLM-L6-v2', device=None):
         self.model = SentenceTransformer(model_name, device=device)
         self.device = device
+        # get the embedding size
+        self.embedding_dim = self.model.get_sentence_embedding_dimension()
 
     @torch.no_grad()
     def __call__(self, df):
         values = df.values.flatten().tolist()
+
+        # handle potential missing or blank values
+        values = ["" if pd.isna(v) or v == "" else v for v in values]
+
         # process when value length is only one
         if len(values) == 1:
             x = self.model.encode(values[0],  show_progress_bar=False,
@@ -27,6 +36,11 @@ class SequenceEncoder:
             x = self.model.encode(values, show_progress_bar=True,
                                 convert_to_tensor=True, device=self.device)
 
+        # fill the missing part with zero
+        zero_vector = torch.zeros((len(values), self.embedding_dim), device=self.device)
+        mask = torch.tensor([v == "" for v in values], dtype=torch.bool, device=self.device)
+        x = torch.where(mask.unsqueeze(-1), zero_vector, x)
+
         return x.cpu()
 
 
@@ -34,12 +48,14 @@ class IdentityEncoder:
     ''' cover numeric encoding for ports, or other numeric value/attributes
     
     '''
-    def __init__(self, dtype=None):
+    def __init__(self, dtype=None, output_dim = None):
         self.dtype = dtype
+        self.output_dim = output_dim
     
     def __call__(self, df):
-        return torch.from_numpy(df.values).view(-1,1).to(self.dtype)
-
+        x = torch.from_numpy(df.values).view(-1,1).to(self.dtype)
+        x = F.pad(x, (0, self.output_dim - 1), "constant", 0)
+        return x
 
 class CateEncoder:
     ''' cover categorical encoding for status, response code

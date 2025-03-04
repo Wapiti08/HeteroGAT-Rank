@@ -33,6 +33,7 @@ from pathlib import Path
 import pickle
 import numpy as np
 
+
 @ray.remote
 def process_subgraphs(subgraph_batch):
     '''
@@ -40,10 +41,12 @@ def process_subgraphs(subgraph_batch):
     '''
 
     seq_encoder = encoder.SequenceEncoder()
-    iden_encoder = encoder.IdentityEncoder(dtype=torch.float)
+    iden_encoder = encoder.IdentityEncoder(dtype=torch.float, output_dim=seq_encoder.embedding_dim)
+
+    max_edges = max([len(subgraph['edges']) for subgraph in subgraph_batch])
 
     data_list = []
-    for subgraph in subgraph_batch:
+    for subgraph in subgraph_batch[:10]:
         # encode nodes and edges
         nodes = subgraph['nodes']
         edges = subgraph['edges']
@@ -64,11 +67,14 @@ def process_subgraphs(subgraph_batch):
             if node_type == 'Port':
                 # ensure the value is numeric
                 type_nodes['value'] = pd.to_numeric(type_nodes['value'], errors='coerce').fillna(0)
-
                 features = iden_encoder(type_nodes[['value']])
+
             else:
+                # ensure all missing values are handled properly
+                type_nodes['value'] = type_nodes['value'].fillna("")
                 features = seq_encoder(type_nodes[['value']])
-            hetero_data['node'].x = features
+
+            hetero_data[node_type].x = features
             # comment it for second-stage exploration
             # hetero_data['node'].eco = cate_encoder(type_nodes[['eco']])
 
@@ -76,16 +82,32 @@ def process_subgraphs(subgraph_batch):
         for edge_type in edge_df['type'].unique():
             type_edges = edge_df[edge_df['type'] == edge_type]
             
+            # handle missing part
+            type_edges["source"] = type_edges['source'].fillna("")
+            type_edges["target"] = type_edges["target"].fillna("")
+
             sources = seq_encoder(type_edges[['source']].astype(str))
             targets = seq_encoder(type_edges[['target']].astype(str))
-            
 
             sources = torch.as_tensor(sources, dtype=torch.long).view(1, -1)
             targets = torch.as_tensor(targets, dtype=torch.long).view(1, -1)
-            # ensure the shape is (2,N)
+            
+            # ensure all edge indices are padded to max_edges
+            pad_size = max(0, max_edges - sources.shape[1])             
+            
+            if pad_size > 0:
+                # use -1 for padding
+                pad_tensor = torch.full((1, pad_size), -1, dtype=torch.long)
+                sources = torch.cat([sources, pad_tensor], dim = 1)
+                targets = torch.cat([targets, pad_tensor], dim= 1)
+
+
+            # ensure the shape is (2,max_edges)
             hetero_data[edge_type].edge_index = torch.cat([sources, targets], dim=0)
 
             edge_values = seq_encoder(type_edges[['value']])
+            # pad attributes
+            edge_values = torch.cat([edge_values, torch.zeros(pad_size, edge_values.shape[1])], dim=0)
 
             hetero_data[edge_type].edge_attr = edge_values
 
@@ -94,9 +116,17 @@ def process_subgraphs(subgraph_batch):
 
         data_list.append(hetero_data)
     
+    print(data_list)
+    
     # create a batched data object
-    return Batch.from_data_list(data_list)
+    batch = Batch.from_data_list(data_list)
 
+    # generate batch masks
+    for edge_type in batch.edge_index_dict:
+        mask = batch.edge_index_dict[edge_type] != -1
+        batch.edge_mask_dict[edge_type] = mask
+
+    return batch
 
 class LabeledSubGraphs(Dataset):
     
@@ -161,7 +191,7 @@ class LabeledSubGraphs(Dataset):
             tasks = [
                 # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
                 process_subgraphs.remote(batch)
-                for batch in subgraph_batches
+                for batch in subgraph_batches[:10]
             ]
             results = ray.get(tasks)    
         finally:
