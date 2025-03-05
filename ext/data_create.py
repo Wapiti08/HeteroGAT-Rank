@@ -32,22 +32,25 @@ import pandas as pd
 from pathlib import Path
 import pickle
 import numpy as np
+from torch_geometric.transforms import Pad
 
 
 @ray.remote
-def process_subgraphs(subgraph_batch):
-    '''
-    process a batch of subgraphs and return a batched data object
-    '''
-
+def process_subgraphs(subgraph_batch, max_nodes_per_type, max_edges_per_type):
+    """
+    Process a batch of subgraphs and return a batched data object.
+    """
     seq_encoder = encoder.SequenceEncoder()
     iden_encoder = encoder.IdentityEncoder(dtype=torch.float, output_dim=seq_encoder.embedding_dim)
 
-    max_edges = max([len(subgraph['edges']) for subgraph in subgraph_batch])
+    # Initialize the Pad transform with the calculated max values
+    pad_transform = Pad(max_num_nodes=max_nodes_per_type, max_num_edges=max_edges_per_type)
 
     data_list = []
-    for subgraph in subgraph_batch[:10]:
-        # encode nodes and edges
+    all_node_types = set()
+    feature_dim = None
+    
+    for subgraph in subgraph_batch:
         nodes = subgraph['nodes']
         edges = subgraph['edges']
         label = subgraph['label']
@@ -55,78 +58,60 @@ def process_subgraphs(subgraph_batch):
         node_df = pd.DataFrame(nodes)
         edge_df = pd.DataFrame(edges)
 
-        # initialize heterodata
+        all_node_types.update(node_df['type'].unique())
+
         hetero_data = HeteroData()
-
-        # process nodes
-        for node_type in node_df['type'].unique():
-            type_nodes = node_df[node_df['type']==node_type]
-            if type_nodes.empty:
-                continue
-
+        # Process nodes
+        for node_type, type_nodes in node_df.groupby('type'):
             if node_type == 'Port':
-                # ensure the value is numeric
                 type_nodes['value'] = pd.to_numeric(type_nodes['value'], errors='coerce').fillna(0)
                 features = iden_encoder(type_nodes[['value']])
-
             else:
-                # ensure all missing values are handled properly
                 type_nodes['value'] = type_nodes['value'].fillna("")
                 features = seq_encoder(type_nodes[['value']])
 
+            # Set feature_dim based on the first processed node type
+            if feature_dim is None:
+                feature_dim = features.size(1)
+
             hetero_data[node_type].x = features
-            # comment it for second-stage exploration
-            # hetero_data['node'].eco = cate_encoder(type_nodes[['eco']])
+            hetero_data[node_type].num_nodes = len(type_nodes)
 
-        # process edges
-        for edge_type in edge_df['type'].unique():
-            type_edges = edge_df[edge_df['type'] == edge_type]
-            
-            # handle missing part
-            type_edges["source"] = type_edges['source'].fillna("")
-            type_edges["target"] = type_edges["target"].fillna("")
+        # Process edges
+        for edge_type, type_edges in edge_df.groupby('type'):
+            type_edges['source'] = type_edges['source'].fillna("")
+            type_edges['target'] = type_edges['target'].fillna("")
 
-            sources = seq_encoder(type_edges[['source']].astype(str))
-            targets = seq_encoder(type_edges[['target']].astype(str))
+            sources = seq_encoder(type_edges[['source']].astype(str)).view(1, -1)
+            targets = seq_encoder(type_edges[['target']].astype(str)).view(1, -1)
 
-            sources = torch.as_tensor(sources, dtype=torch.long).view(1, -1)
-            targets = torch.as_tensor(targets, dtype=torch.long).view(1, -1)
-            
-            # ensure all edge indices are padded to max_edges
-            pad_size = max(0, max_edges - sources.shape[1])             
-            
-            if pad_size > 0:
-                # use -1 for padding
-                pad_tensor = torch.full((1, pad_size), -1, dtype=torch.long)
-                sources = torch.cat([sources, pad_tensor], dim = 1)
-                targets = torch.cat([targets, pad_tensor], dim= 1)
-
-
-            # ensure the shape is (2,max_edges)
             hetero_data[edge_type].edge_index = torch.cat([sources, targets], dim=0)
+            hetero_data[edge_type].edge_attr = seq_encoder(type_edges[['value']])
 
-            edge_values = seq_encoder(type_edges[['value']])
-            # pad attributes
-            edge_values = torch.cat([edge_values, torch.zeros(pad_size, edge_values.shape[1])], dim=0)
-
-            hetero_data[edge_type].edge_attr = edge_values
-
-        # add labels
+        # Add label
         hetero_data['label'] = torch.tensor(label, dtype=torch.long)
 
+        # check whether there is missing key
+        for node_type in all_node_types:
+            if node_type not in hetero_data:
+                hetero_data[node_type].x = torch.zeros((max_nodes_per_type[node_type], feature_dim))
+                hetero_data[node_type].num_nodes = max_nodes_per_type[node_type]
+
+        try:
+            # apply padding transform
+            hetero_data = pad_transform(hetero_data)
+        except Exception as e:
+            print(e)
+            print(hetero_data)
+            exit()
+
         data_list.append(hetero_data)
-    
-    print(data_list)
-    
-    # create a batched data object
+
+    # Create a batched data object
     batch = Batch.from_data_list(data_list)
 
-    # generate batch masks
-    for edge_type in batch.edge_index_dict:
-        mask = batch.edge_index_dict[edge_type] != -1
-        batch.edge_mask_dict[edge_type] = mask
-
     return batch
+
 
 class LabeledSubGraphs(Dataset):
     
@@ -165,17 +150,43 @@ class LabeledSubGraphs(Dataset):
         '''
         pass
 
+    def pad_size(self, subgraphs):
+        # initialize dictionaries to track maximum counts
+        max_nodes_per_type = {}
+        max_edges_per_type = {}
+
+        # First pass to determine max nodes and edges per type
+        for subgraph in subgraphs:
+            node_df = pd.DataFrame(subgraph['nodes'])
+            edge_df = pd.DataFrame(subgraph['edges'])
+            if "type" in node_df.columns:
+                # Update max nodes per type
+                for node_type, type_nodes in node_df.groupby('type'):
+                    max_nodes_per_type[node_type] = max(max_nodes_per_type.get(node_type, 0), len(type_nodes))
+            if "type" in edge_df.columns:
+                # Update max edges per type
+                for edge_type, type_edges in edge_df.groupby('type'):
+                    max_edges_per_type[edge_type] = max(max_edges_per_type.get(edge_type, 0), len(type_edges))
+
+        return max_nodes_per_type, max_edges_per_type
 
     def process(self):
         # load the raw data --- non-packaged directory to avoid large size package to Ray
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
                              "subgraphs.pkl")
+        
         with open(raw_path, 'rb') as fr:
             subgraphs = pickle.load(fr)
 
+        # initialize dictionaries to track maximum counts
+        max_nodes_per_type = {}
+        max_edges_per_type = {}
+
+        max_nodes_per_type, max_edges_per_type = self.pad_size(subgraphs)
+        
         # convert to pandas framework for easier processing
         subgraphs_df = pd.DataFrame(subgraphs)
-        
+
         # split into batches
         num_batches = len(subgraphs_df) // self.batch_size + 1
         subgraph_batches = [
@@ -190,8 +201,8 @@ class LabeledSubGraphs(Dataset):
         try:
             tasks = [
                 # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
-                process_subgraphs.remote(batch)
-                for batch in subgraph_batches[:10]
+                process_subgraphs.remote(batch,max_nodes_per_type, max_edges_per_type )
+                for batch in subgraph_batches
             ]
             results = ray.get(tasks)    
         finally:
