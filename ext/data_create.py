@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import ray
-from ext import encoder
+from ext import fea_encoder
 import os
 import os.path as osp
 import torch
@@ -33,15 +33,23 @@ from pathlib import Path
 import pickle
 import numpy as np
 from torch_geometric.transforms import Pad
+import hashlib
+
+def generate_node_id(row):
+    '''
+    generate a unique ID for each node based on its attributes
+    '''
+    unique_str = f"{row['type']}_{row['value']}_{row.get('eco', '')}"
+    return hashlib.md5(unique_str.encode()).hexdigest()[:10]
 
 
 @ray.remote
-def process_subgraphs(subgraph_batch, max_nodes_per_type, max_edges_per_type):
-    """
-    Process a batch of subgraphs and return a batched data object.
-    """
-    seq_encoder = encoder.SequenceEncoder()
-    iden_encoder = encoder.IdentityEncoder(dtype=torch.float, output_dim=seq_encoder.embedding_dim)
+# Modify edge processing in the process_subgraphs function
+def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict):
+    
+    # create encoders using saved states (avoids reinitialization)
+    seq_encoder = fea_encoder.SequenceEncoder()
+    iden_encoder = fea_encoder.IdentityEncoder(dtype=torch.float, output_dim=seq_encoder.embedding_dim)
 
     # Initialize the Pad transform with the calculated max values
     pad_transform = Pad(max_num_nodes=max_nodes_per_type, max_num_edges=max_edges_per_type)
@@ -61,8 +69,21 @@ def process_subgraphs(subgraph_batch, max_nodes_per_type, max_edges_per_type):
         all_node_types.update(node_df['type'].unique())
 
         hetero_data = HeteroData()
+
+        # map original node ID to new index
+        node_idx_map = {}
+        node_counter = {}
+
         # Process nodes
         for node_type, type_nodes in node_df.groupby('type'):
+            type_nodes['id'] = type_nodes.apply(generate_node_id, axis=1)
+            print(type_nodes)
+
+            # Ensure the 'value' column is present
+            if 'value' not in type_nodes.columns:
+                print(f"Warning: 'value' column missing for node type {node_type}")
+                continue
+            
             if node_type == 'Port':
                 type_nodes['value'] = pd.to_numeric(type_nodes['value'], errors='coerce').fillna(0)
                 features = iden_encoder(type_nodes[['value']])
@@ -70,23 +91,30 @@ def process_subgraphs(subgraph_batch, max_nodes_per_type, max_edges_per_type):
                 type_nodes['value'] = type_nodes['value'].fillna("")
                 features = seq_encoder(type_nodes[['value']])
 
-            # Set feature_dim based on the first processed node type
             if feature_dim is None:
                 feature_dim = features.size(1)
 
             hetero_data[node_type].x = features
             hetero_data[node_type].num_nodes = len(type_nodes)
 
+            node_idx_map.update({node_id: i for i, node_id in enumerate(type_nodes['id'])})
+            node_counter[node_type] = len(type_nodes)
+
         # Process edges
         for edge_type, type_edges in edge_df.groupby('type'):
-            type_edges['source'] = type_edges['source'].fillna("")
-            type_edges['target'] = type_edges['target'].fillna("")
+            # Modify edge processing to handle the edge_tuple
+            for _, type_edge in type_edges.iterrows():
+                edge_tuple = (type_edge['source'], edge_type, type_edge['target'])
+                if edge_tuple not in max_edges_per_type:
+                    continue  # Skip processing if edge_tuple is not in the max_edges_per_type
+                src_ids = type_edge['source'].map(node_idx_map)
+                tgt_ids = type_edge['target'].map(node_idx_map)
 
-            sources = seq_encoder(type_edges[['source']].astype(str)).view(1, -1)
-            targets = seq_encoder(type_edges[['target']].astype(str)).view(1, -1)
+                valid_edges = src_ids.notna() & tgt_ids.notna()
+                edge_index = torch.tensor([src_ids[valid_edges].values, tgt_ids[valid_edges].values], dtype=torch.long)
 
-            hetero_data[edge_type].edge_index = torch.cat([sources, targets], dim=0)
-            hetero_data[edge_type].edge_attr = seq_encoder(type_edges[['value']])
+                hetero_data[edge_type].edge_index = edge_index
+                hetero_data[edge_type].edge_attr = seq_encoder(type_edges[['value']])
 
         # Add label
         hetero_data['label'] = torch.tensor(label, dtype=torch.long)
@@ -98,7 +126,6 @@ def process_subgraphs(subgraph_batch, max_nodes_per_type, max_edges_per_type):
                 hetero_data[node_type].num_nodes = max_nodes_per_type[node_type]
 
         try:
-            # apply padding transform
             hetero_data = pad_transform(hetero_data)
         except Exception as e:
             print(e)
@@ -113,6 +140,7 @@ def process_subgraphs(subgraph_batch, max_nodes_per_type, max_edges_per_type):
     return batch
 
 
+
 class LabeledSubGraphs(Dataset):
     
     def __init__(self, root, batch_size=10, transform=None, pre_transform=None, pre_filter=None):
@@ -125,11 +153,8 @@ class LabeledSubGraphs(Dataset):
         '''
         self.batch_size = batch_size
         self.data_path = root
-        super().__init__(root, transform, pre_transform, pre_filter)
 
-        # initialize encoders for node/edge attributes
-        # self.seq_encoder = encoder.SequenceEncoder()
-        # self.iden_encoder = encoder.IdentityEncoder(dtype=torch.float)
+        super().__init__(root, transform, pre_transform, pre_filter)
 
 
     @property
@@ -159,18 +184,23 @@ class LabeledSubGraphs(Dataset):
         for subgraph in subgraphs:
             node_df = pd.DataFrame(subgraph['nodes'])
             edge_df = pd.DataFrame(subgraph['edges'])
+
             if "type" in node_df.columns:
-                # Update max nodes per type
                 for node_type, type_nodes in node_df.groupby('type'):
+                    # Update max nodes per type
                     max_nodes_per_type[node_type] = max(max_nodes_per_type.get(node_type, 0), len(type_nodes))
+
             if "type" in edge_df.columns:
                 # Update max edges per type
                 for edge_type, type_edges in edge_df.groupby('type'):
-                    max_edges_per_type[edge_type] = max(max_edges_per_type.get(edge_type, 0), len(type_edges))
+                    for src, tgt in zip(type_edges['source'], type_edges['target']):
+                        edge_tuple = (type_edges['source'].iloc[0], edge_type, type_edges['target'].iloc[0])
+                        max_edges_per_type[edge_tuple] = max(max_edges_per_type.get(edge_tuple, 0), len(type_edges))
 
         return max_nodes_per_type, max_edges_per_type
 
-    def process(self):
+
+    def process(self,):
         # load the raw data --- non-packaged directory to avoid large size package to Ray
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
                              "subgraphs.pkl")
@@ -178,12 +208,8 @@ class LabeledSubGraphs(Dataset):
         with open(raw_path, 'rb') as fr:
             subgraphs = pickle.load(fr)
 
-        # initialize dictionaries to track maximum counts
-        max_nodes_per_type = {}
-        max_edges_per_type = {}
-
         max_nodes_per_type, max_edges_per_type = self.pad_size(subgraphs)
-        
+
         # convert to pandas framework for easier processing
         subgraphs_df = pd.DataFrame(subgraphs)
 
@@ -194,6 +220,7 @@ class LabeledSubGraphs(Dataset):
             for i in range(num_batches)
         ]
 
+
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                               "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
@@ -201,7 +228,7 @@ class LabeledSubGraphs(Dataset):
         try:
             tasks = [
                 # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
-                process_subgraphs.remote(batch,max_nodes_per_type, max_edges_per_type )
+                process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type)
                 for batch in subgraph_batches
             ]
             results = ray.get(tasks)    
