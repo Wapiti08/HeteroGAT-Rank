@@ -39,15 +39,25 @@ def generate_node_id(row):
     '''
     generate a unique ID for each node based on its attributes
     '''
-    unique_str = f"{row['type']}_{row['value']}_{row.get('eco', '')}"
+    '''
+    Generate a unique ID for each node based on its attributes
+    '''
+    # Ensure all values are strings and non-empty
+    type_val = str(row.get('type', '')).strip()
+    value_val = str(row.get('value', '')).strip()
+    eco_val = str(row.get('eco', '')).strip()
+
+    # If all attributes are empty, raise a warning or use a fallback ID
+    if not type_val and not value_val and not eco_val:
+        raise ValueError(f"Invalid node attributes: {row}")
+
+    unique_str = f"{type_val}_{value_val}_{eco_val}"
     return hashlib.md5(unique_str.encode()).hexdigest()[:10]
 
 
 @ray.remote
-# Modify edge processing in the process_subgraphs function
 def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict):
-    
-    # create encoders using saved states (avoids reinitialization)
+    # Create encoders using saved states (avoids reinitialization)
     seq_encoder = fea_encoder.SequenceEncoder()
     iden_encoder = fea_encoder.IdentityEncoder(dtype=torch.float, output_dim=seq_encoder.embedding_dim)
 
@@ -57,7 +67,7 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
     data_list = []
     all_node_types = set()
     feature_dim = None
-    
+
     for subgraph in subgraph_batch:
         nodes = subgraph['nodes']
         edges = subgraph['edges']
@@ -70,20 +80,14 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
 
         hetero_data = HeteroData()
 
-        # map original node ID to new index
-        node_idx_map = {}
-        node_counter = {}
+        node_df.fillna("", inplace=True)
+
+        # Generate node IDs and use them as the index
+        node_df['id'] = node_df.apply(generate_node_id, axis=1)
+        node_df.set_index('id', inplace=True)
 
         # Process nodes
         for node_type, type_nodes in node_df.groupby('type'):
-            type_nodes['id'] = type_nodes.apply(generate_node_id, axis=1)
-            print(type_nodes)
-
-            # Ensure the 'value' column is present
-            if 'value' not in type_nodes.columns:
-                print(f"Warning: 'value' column missing for node type {node_type}")
-                continue
-            
             if node_type == 'Port':
                 type_nodes['value'] = pd.to_numeric(type_nodes['value'], errors='coerce').fillna(0)
                 features = iden_encoder(type_nodes[['value']])
@@ -97,29 +101,27 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
             hetero_data[node_type].x = features
             hetero_data[node_type].num_nodes = len(type_nodes)
 
-            node_idx_map.update({node_id: i for i, node_id in enumerate(type_nodes['id'])})
-            node_counter[node_type] = len(type_nodes)
+        # Process edges (Ensure source & target reference `id`)
+        edge_df.dropna(subset=['source', 'target'], inplace=True)
 
-        # Process edges
+        # Convert source & target to node index based on `id`
+        valid_edges = edge_df['source'].isin(node_df.index) & edge_df['target'].isin(node_df.index)
+        edge_df = edge_df[valid_edges]
+
         for edge_type, type_edges in edge_df.groupby('type'):
-            # Modify edge processing to handle the edge_tuple
-            for _, type_edge in type_edges.iterrows():
-                edge_tuple = (type_edge['source'], edge_type, type_edge['target'])
-                if edge_tuple not in max_edges_per_type:
-                    continue  # Skip processing if edge_tuple is not in the max_edges_per_type
-                src_ids = type_edge['source'].map(node_idx_map)
-                tgt_ids = type_edge['target'].map(node_idx_map)
+            src_ids = type_edges['source'].map(node_df.index.get_loc).values
+            tgt_ids = type_edges['target'].map(node_df.index.get_loc).values
 
-                valid_edges = src_ids.notna() & tgt_ids.notna()
-                edge_index = torch.tensor([src_ids[valid_edges].values, tgt_ids[valid_edges].values], dtype=torch.long)
+            edge_index = torch.tensor([src_ids, tgt_ids], dtype=torch.long)
+            edge_attr = seq_encoder(type_edges[['value']])
 
-                hetero_data[edge_type].edge_index = edge_index
-                hetero_data[edge_type].edge_attr = seq_encoder(type_edges[['value']])
+            hetero_data[edge_type].edge_index = edge_index
+            hetero_data[edge_type].edge_attr = edge_attr
 
         # Add label
         hetero_data['label'] = torch.tensor(label, dtype=torch.long)
 
-        # check whether there is missing key
+        # Ensure all node types are present
         for node_type in all_node_types:
             if node_type not in hetero_data:
                 hetero_data[node_type].x = torch.zeros((max_nodes_per_type[node_type], feature_dim))

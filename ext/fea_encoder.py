@@ -25,8 +25,8 @@ class SequenceEncoder:
     def __call__(self, df):
         values = df.values.flatten().tolist()
 
-        # handle potential missing or blank values
-        values = ["" if pd.isna(v) or v == "" else v for v in values]
+        # handle potential missing, blank, or zero values
+        values = ["" if pd.isna(v) or v == "" or v == 0 else v for v in values]
 
         # process when value length is only one
         if len(values) == 1:
