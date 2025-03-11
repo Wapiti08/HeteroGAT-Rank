@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import ray
-from ext import fea_encoder
 import os
 import os.path as osp
 import torch
@@ -51,15 +50,32 @@ def generate_node_id(row):
     if not type_val and not value_val and not eco_val:
         raise ValueError(f"Invalid node attributes: {row}")
 
-    unique_str = f"{type_val}_{value_val}_{eco_val}"
-    return hashlib.md5(unique_str.encode()).hexdigest()[:10]
+    # unique_str = f"{type_val}_{value_val}_{eco_val}"
+    return hash(type_val, value_val, eco_val)
+
+@ray.remote
+class EncoderActor:
+    def __init__(self,):
+        # Import here to avoid issues with Ray serialization
+        from ext import fea_encoder
+        self.seq_encoder = fea_encoder.SequenceEncoder()
+        self.iden_encoder = fea_encoder.IdentityEncoder(dtype=torch.float, \
+                                                        output_dim=self.eq_encoder.embedding_dim)
+
+    def encode_sequence(self, values):
+        return self.seq_encoder(values)
+    
+    def encode_identify(self, values):
+        return self.iden_encoder(values)
 
 
 @ray.remote
-def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict):
-    # Create encoders using saved states (avoids reinitialization)
-    seq_encoder = fea_encoder.SequenceEncoder()
-    iden_encoder = fea_encoder.IdentityEncoder(dtype=torch.float, output_dim=seq_encoder.embedding_dim)
+def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict, encoder_actor: EncoderActor):
+    
+    # fetch the encoders from the actor
+    
+    seq_encoder = ray.get(encoder_actor.encode_sequence.remote)
+    iden_encoder = ray.get(encoder_actor.encode_identify.remote)
 
     # Initialize the Pad transform with the calculated max values
     pad_transform = Pad(max_num_nodes=max_nodes_per_type, max_num_edges=max_edges_per_type)
@@ -80,7 +96,8 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
 
         hetero_data = HeteroData()
 
-        node_df.fillna("", inplace=True)
+        # node_df.fillna("", inplace=True)
+        node_df.dropna(inplace=True)
 
         # Generate node IDs and use them as the index
         node_df['id'] = node_df.apply(generate_node_id, axis=1)
@@ -98,7 +115,7 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
             if feature_dim is None:
                 feature_dim = features.size(1)
 
-            hetero_data[node_type].x = features
+            hetero_data[node_type].x = features.half()
             hetero_data[node_type].num_nodes = len(type_nodes)
 
         # Process edges (Ensure source & target reference `id`)
@@ -109,8 +126,8 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
         edge_df = edge_df[valid_edges]
 
         for edge_type, type_edges in edge_df.groupby('type'):
-            src_ids = type_edges['source'].map(node_df.index.get_loc).values
-            tgt_ids = type_edges['target'].map(node_df.index.get_loc).values
+            src_ids = type_edges['source'].map(node_df.index.get_loc).to_numpy(dtype=np.int32)
+            tgt_ids = type_edges['target'].map(node_df.index.get_loc).to_numpy(dtype=np.int32)
 
             edge_index = torch.tensor([src_ids, tgt_ids], dtype=torch.long)
             edge_attr = seq_encoder(type_edges[['value']])
@@ -140,7 +157,6 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
     batch = Batch.from_data_list(data_list)
 
     return batch
-
 
 
 class LabeledSubGraphs(Dataset):
@@ -228,18 +244,26 @@ class LabeledSubGraphs(Dataset):
                               "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
 
         try:
+            # create a single encoder actor
+            encoder_actor = EncoderActor.remote()
+
             tasks = [
                 # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
-                process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type)
+                process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
                 for batch in subgraph_batches
             ]
             results = ray.get(tasks)    
         finally:
+            # free memory after execution
+            del subgraph_batches
             ray.shutdown()
 
         # save the processed batches
         for i, batch in enumerate(results):
-            torch.save(batch, osp.join(self.processed_dir, f'batch_{i}.pt'))
+            # save processed batches in float16 instead of float32
+            torch.save(batch.half(), osp.join(self.processed_dir, f'batch_{i}.pt'))
+        
+        del results
 
     def len(self):
         return len(self.processed_file_names)
