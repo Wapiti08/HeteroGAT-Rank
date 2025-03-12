@@ -1,7 +1,7 @@
 '''
  # @ Create Time: 2024-12-18 09:27:11
  # @ Modified time: 2024-12-18 09:27:14
- # @ Description: create graph dataset suitable for GNN model training in pytorch
+ # @ Description: create graph dataset suitable for GNN model training in pytorch in multiple steps (reduce one-time memory cost)
  
 node: {
     'value': str content / numeric,
@@ -73,6 +73,11 @@ class EncoderActor:
 def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict, \
                       encoder_actor: EncoderActor):
     
+    # fetch the encoders from the actor
+    
+    # seq_encoder = ray.get(encoder_actor.encode_sequence.remote())
+    # iden_encoder = ray.get(encoder_actor.encode_identify.remote())
+
     # Initialize the Pad transform with the calculated max values
     pad_transform = Pad(max_num_nodes=max_nodes_per_type, max_num_edges=max_edges_per_type)
 

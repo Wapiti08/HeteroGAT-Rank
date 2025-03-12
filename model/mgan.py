@@ -18,17 +18,14 @@ class MaskedHeteroGAT(torch.nn.Module):
         self.node_mask = torch.nn.Parameter(torch.ones(num_nodes), requires_grad=True)
     
         # GAT layers
-        self.conv1 = HeteroConv(
-            {
+        self.conv1 = HeteroConv({
                 ('Package_Name', 'Action', 'Path'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
                 ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
                 ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
                 ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
                 ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
                 ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-            },
-            aggr='mean',
-        )
+            },aggr='mean',)
 
         # define second layer
         self.conv2 = HeteroConv(
@@ -90,7 +87,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         return probs
         
 
-    def subgraph_cls(self, x_pooled, edge_dict, batch_pooled:
+    def subgraph_cls(self, x_pooled, edge_dict, batch_pooled):
         ''' process node feature at graph-level for binary classification
 
         :param x_pooled: pooled node features from DiffPool
