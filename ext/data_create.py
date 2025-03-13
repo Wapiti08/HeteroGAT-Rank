@@ -235,11 +235,7 @@ class LabeledSubGraphs(Dataset):
 
         # split into batches
         num_batches = len(subgraphs_df) // self.batch_size + 1
-        subgraph_batches = [
-            subgraphs_df.iloc[i * self.batch_size: (i+1) * self.batch_size].to_dict(orient='records')
-            for i in range(num_batches)
-        ]
-
+        subgraph_batches = (subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches))
 
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
@@ -254,6 +250,10 @@ class LabeledSubGraphs(Dataset):
                 process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
                 for batch in subgraph_batches
             ]
+            # limit the number of batches processed simultaneously
+            results = []
+            while tasks:
+
             results = ray.get(tasks)    
         finally:
             # free memory after execution

@@ -240,10 +240,7 @@ class LabeledSubGraphs(Dataset):
 
         # split into batches
         num_batches = len(subgraphs_df) // self.batch_size + 1
-        subgraph_batches = [
-            subgraphs_df.iloc[i * self.batch_size: (i+1) * self.batch_size].to_dict(orient='records')
-            for i in range(num_batches)
-        ]
+        subgraph_batches = (subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches))
 
 
         # process batches in parallel
@@ -254,12 +251,24 @@ class LabeledSubGraphs(Dataset):
             # create a single encoder actor
             encoder_actor = EncoderActor.remote()
 
-            tasks = [
-                # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
-                process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
-                for batch in subgraph_batches
-            ]
-            results = ray.get(tasks)    
+            # process in rounds using ray.wait()
+            tasks = []
+            results = []
+            max_concurrent_tasks = 5
+
+            for batch in subgraph_batches:
+                if len(tasks) >= max_concurrent_tasks:
+                    # wait for at least one task to complete before submitting a new one
+                    done, tasks = ray.wait(tasks, num_returns = 1)
+                    results.append(ray.get(done[0]))
+                
+                # submit a new task
+                tasks.append(process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor))
+
+            # collect remaining results
+            for task in tasks:
+                results.append(ray.get(task))
+
         finally:
             # free memory after execution
             del subgraph_batches
@@ -268,7 +277,7 @@ class LabeledSubGraphs(Dataset):
         # save the processed batches
         for i, batch in enumerate(results):
             # save processed batches in float16 instead of float32
-            torch.save(batch.half(), osp.join(self.processed_dir, f'batch_{i}.pt'))
+            torch.save(batch, osp.join(self.processed_dir, f'batch_{i}.pt'))
         
         del results
 

@@ -34,7 +34,7 @@ class EcosystemFeatureAnalysis:
         ''' extract intra- and inter-ecosystem subgraphs
         
         '''
-        intra_edges = []
+        intra_edges = {}
         inter_edges = []
 
         for edge_type, edge_index in edge_index_dict.items():
@@ -43,11 +43,16 @@ class EcosystemFeatureAnalysis:
                 for i in range(edge_index.shape[1]):
                     # extract src and dst
                     src, dst = edge_index[:,i].tolist()
+                    # identify the ecosystem
+                    eco = self.eco_dict.get[src]
                     # match the ecosystem
-                    if self.eco_dict.get(src) == self.eco_dict.get(dst):
-                        intra_edges.append((src, dst))
+                    if eco is not None and eco == self.eco_dict.get(dst):
+                        # ensure the ecosystem entry exists
+                        if eco not in intra_edges:
+                            intra_edges[eco] = []
+                        intra_edges[eco].append((src, dst))
                     else:
-                        inter_edges.append((src, tgt))
+                        inter_edges.append((src, dst))
         
         return intra_edges, inter_edges
 
@@ -73,8 +78,8 @@ class EcosystemFeatureAnalysis:
         node_att, edge_att = self.extract_attens()
         
         # identify critical nodes --- highly correlated with malicious labels
-        intra_nodes = {node for edge in intra_edges for node in edge}
-        inter_nodes = {node for edge in inter_edges for node in edge}
+        intra_nodes = {edge: edge_att[edge] for eco, edges in intra_edges.items() for edge in edges if edge in edge_att}
+        inter_nodes = {edge: edge_att[edge] for edge in inter_edges if edge in edge_att}
 
         # normalize importance scores
         intra_values, inter_values = list(intra_values.values()), list(inter_values.values())
@@ -88,36 +93,32 @@ class EcosystemFeatureAnalysis:
         critical_intra_edges = {edge: score for edge, score in intra_attens.items() if score >= self.threshold}
         critical_inter_edges = {edge: score for edge, score in inter_attens.items() if score >= self.threshold}
 
-        # Identify critical nodes (high influence in malicious classification)
-        intra_nodes = {node for edge in critical_intra_edges for node in edge}
+        # identify critical edges per ecosystem
+        critical_intra_edges_per_eco = {eco: {} for eco in intra_edges.keys()}
+        for eco, edges in intra_edges.items():
+            critical_intra_edges_per_eco[eco] = {edge: critical_intra_edges[edge] for edge in edges if edge in critical_intra_edges}
+        
+        # identify critical nodes per ecosystem
+        critical_intra_nodes_per_eco = {eco: set() for eco in intra_edges.keys()}
+        for eco, edges in critical_intra_edges_per_eco.items():
+            critical_intra_nodes_per_eco[eco].update(node for edge in edges for node in edge)
+
+        # identify critical inter-nodes
         inter_nodes = {node for edge in critical_inter_edges for node in edge}
 
         # identify shared critical nodes & edges (common indicators of malicious behavior)
-        shared_critical_edges = set(intra_edges) & set(inter_edges)
-        shared_critical_nodes = intra_nodes & inter_nodes
+        shared_critical_edges = set(critical_intra_edges.keys()) & set(critical_inter_edges.keys())
+        shared_critical_nodes = set().union(*critical_intra_nodes_per_eco.values()) & inter_nodes
         
         return {
-            "critical_intra_edges": critical_intra_edges,
+            "critical_intra_edges": critical_intra_edges_per_eco,
             "critical_inter_edges": critical_inter_edges,
-            "critical_intra_nodes": intra_nodes,
+            "critical_intra_nodes": critical_intra_nodes_per_eco,
             "critical_inter_nodes": inter_nodes,
             "shared_critical_edges": shared_critical_edges,
             "shared_critical_nodes": shared_critical_nodes,
         }
 
-
-    def heatmap_fea(self, critial_elements: dict ):
-        ''' Heatmap visualization for critical intra- and inter-ecosystem nodes/edges.
-
-                '''
-        data = {
-            "Element":
-            "Type":
-            "Attention":
-        }
-
-
-    
     def rank_edges_and_nodes(self, intra_attens:dict, inter_attens:dict, node_att:dict):
         ''' rank nodes based on learned attention scores
         
