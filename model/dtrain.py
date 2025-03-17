@@ -4,16 +4,20 @@
  # @ Description: implement distributed training process with multi-cpus
  '''
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataloader, DistributedSampler
-
+from model import mgan
 
 class DistributedTrainer:
-    def __init__(self, model_class, model_kwargs: dict, x_dict: dict, edge_index_dict: dict, y_dict:dict, 
-                 num_epochs: int, world_size: int):
+    def __init__(self, model_class, model_kwargs: dict, x_dict: dict, edge_index_dict: dict, \
+                 y_dict:dict, num_epochs: int, world_size: int):
         ''' initialize the distributed training setup
 
         Args:
@@ -104,3 +108,8 @@ class DistributedTrainer:
             nprocs=self.world_size,
             join=True
         )
+
+if __name__ == "__main__":
+
+    
+    model_class_1 = mgan.MaskedHeteroGAT()

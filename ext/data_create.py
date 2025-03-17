@@ -1,7 +1,7 @@
 '''
  # @ Create Time: 2024-12-18 09:27:11
  # @ Modified time: 2024-12-18 09:27:14
- # @ Description: create graph dataset suitable for GNN model training in pytorch
+ # @ Description: create graph dataset suitable for GNN model training in pytorch in multiple steps (reduce one-time memory cost)
  
 node: {
     'value': str content / numeric,
@@ -73,6 +73,11 @@ class EncoderActor:
 def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict, \
                       encoder_actor: EncoderActor):
     
+    # fetch the encoders from the actor
+    
+    # seq_encoder = ray.get(encoder_actor.encode_sequence.remote())
+    # iden_encoder = ray.get(encoder_actor.encode_identify.remote())
+
     # Initialize the Pad transform with the calculated max values
     pad_transform = Pad(max_num_nodes=max_nodes_per_type, max_num_edges=max_edges_per_type)
 
@@ -237,6 +242,10 @@ class LabeledSubGraphs(Dataset):
         num_batches = len(subgraphs_df) // self.batch_size + 1
         subgraph_batches = (subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches))
 
+        # Set OOM mitigation variables before initializing Ray
+        os.environ["RAY_memory_usage_threshold"] = "0.9"  # Adjust based on node capacity
+        os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
+
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                               "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
@@ -245,16 +254,33 @@ class LabeledSubGraphs(Dataset):
             # create a single encoder actor
             encoder_actor = EncoderActor.remote()
 
-            tasks = [
-                # process_subgraphs.remote(batch, self.seq_encoder, self.iden_encoder)
-                process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
-                for batch in subgraph_batches
-            ]
-            # limit the number of batches processed simultaneously
-            results = []
-            while tasks:
+            # check available resources
+            available_resources = ray.available_resources()
+            # use 80% of the cpus   
+            max_parallel = int(available_resources.get("CPU", 4) * 0.8)
 
-            results = ray.get(tasks)    
+            @ray.remote(num_cpus=2)  # Adjust based on workload
+            def process_subgraphs_wrapper(batch, max_nodes_per_type, max_edges_per_type, actor):
+                return process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, actor)
+
+            # process in rounds using ray.wait()
+            tasks = []
+            results = []
+
+            for batch in subgraph_batches:
+                if len(tasks) >= max_parallel:
+                    # wait for at least one task to complete before submitting a new one
+                    done, tasks = ray.wait(tasks, num_returns = 1)
+                    results.append(ray.get(done[0]))
+                
+                # submit a new task
+                tasks.append(process_subgraphs_wrapper.remote(batch, max_nodes_per_type, \
+                                                              max_edges_per_type, encoder_actor))
+
+            # collect remaining results
+            for task in tasks:
+                results.append(ray.get(task))
+
         finally:
             # free memory after execution
             del subgraph_batches
@@ -263,7 +289,7 @@ class LabeledSubGraphs(Dataset):
         # save the processed batches
         for i, batch in enumerate(results):
             # save processed batches in float16 instead of float32
-            torch.save(batch.half(), osp.join(self.processed_dir, f'batch_{i}.pt'))
+            torch.save(batch, osp.join(self.processed_dir, f'batch_{i}.pt'))
         
         del results
 
@@ -289,7 +315,7 @@ if __name__ == "__main__":
     batch_idx = 0
     if batch_idx < len(dataset):
         batch_data = dataset.get(batch_idx)
-        print(f"loaded batch {batch_idx} with {len(batch_data)} subgraphs")
+        print(f"loaded batch {batch_idx} with {len(ray.get(batch_data))} subgraphs")
     else:
         print("Batch index out of range")
 

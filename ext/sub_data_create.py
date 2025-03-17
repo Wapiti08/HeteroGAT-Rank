@@ -231,7 +231,7 @@ class LabeledSubGraphs(Dataset):
                              "subgraphs.pkl")
         
         with open(raw_path, 'rb') as fr:
-            subgraphs = pickle.load(fr)
+            subgraphs = pickle.load(fr)[:100]
 
         max_nodes_per_type, max_edges_per_type = self.pad_size(subgraphs)
 
@@ -242,6 +242,9 @@ class LabeledSubGraphs(Dataset):
         num_batches = len(subgraphs_df) // self.batch_size + 1
         subgraph_batches = (subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches))
 
+        # Set OOM mitigation variables before initializing Ray
+        os.environ["RAY_memory_usage_threshold"] = "0.9"  # Adjust based on node capacity
+        os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
 
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
@@ -251,19 +254,28 @@ class LabeledSubGraphs(Dataset):
             # create a single encoder actor
             encoder_actor = EncoderActor.remote()
 
+            # check available resources
+            available_resources = ray.available_resources()
+            # use 80% of the cpus   
+            max_parallel = int(available_resources.get("CPU", 4) * 0.8)
+
+            @ray.remote(num_cpus=2)  # Adjust based on workload
+            def process_subgraphs_wrapper(batch, max_nodes_per_type, max_edges_per_type, actor):
+                return process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, actor)
+
             # process in rounds using ray.wait()
             tasks = []
             results = []
-            max_concurrent_tasks = 5
 
             for batch in subgraph_batches:
-                if len(tasks) >= max_concurrent_tasks:
+                if len(tasks) >= max_parallel:
                     # wait for at least one task to complete before submitting a new one
                     done, tasks = ray.wait(tasks, num_returns = 1)
                     results.append(ray.get(done[0]))
                 
                 # submit a new task
-                tasks.append(process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor))
+                tasks.append(process_subgraphs_wrapper.remote(batch, max_nodes_per_type, \
+                                                              max_edges_per_type, encoder_actor))
 
             # collect remaining results
             for task in tasks:
@@ -291,7 +303,7 @@ class LabeledSubGraphs(Dataset):
 
 if __name__ == "__main__":
     # load pickle format of graph dataset with graph representations
-    data_path = Path.cwd().joinpath("output")
+    data_path = Path.cwd().joinpath("test")
 
     # create an instance of the dataset
     dataset = LabeledSubGraphs(root=data_path, batch_size=10)
@@ -303,7 +315,8 @@ if __name__ == "__main__":
     batch_idx = 0
     if batch_idx < len(dataset):
         batch_data = dataset.get(batch_idx)
-        print(f"loaded batch {batch_idx} with {len(batch_data)} subgraphs")
+        print(f"loaded batch {batch_idx}")
+        print(batch_data)
     else:
         print("Batch index out of range")
 

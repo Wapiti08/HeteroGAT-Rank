@@ -4,13 +4,29 @@
  # @ Description: create attention-based Graph Neural Networks to learn feature importance
  '''
 
+import sys
+from pathlib import Path
+sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv, DiffPool
+from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv
+from model import DiffPool
 from torch_geometric import nn
 import torch.nn.functional as F
+from ext.data_create import LabeledSubGraphs
+from torch_geometric.loader import DataLoader
+
 
 class MaskedHeteroGAT(torch.nn.Module):
-    def __init__(self, metadata, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):
+    def __init__(self, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):
+        '''
+        args:
+            hidden_channels: the dimensionality of the hidden node embeddings
+            out_channels: the output dimension of the GAT layer before passing to the cls head
+            num_heads: the number of attention heads in the GATv2Conv layers
+            num_clusters: the number of clusters used in DiffPool layer for hierarchical feature aggregation
+            num_edges: the number of edges in a batch
+            num_nodes: the number of nodes in a batch
+        '''
         super(MaskedHeteroGAT, self).__init__()
     
         # learnable masks ---- initialized with 1
@@ -18,24 +34,27 @@ class MaskedHeteroGAT(torch.nn.Module):
         self.node_mask = torch.nn.Parameter(torch.ones(num_nodes), requires_grad=True)
     
         # GAT layers
-        self.conv1 = HeteroConv({
-                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-            },aggr='mean',)
+        self.conv1 = HeteroConv(
+                    {
+                        ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                        ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                        ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                        ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                        ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                        ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                    },
+                    aggr='mean',  # aggregation method for multi-head attention
+                )
 
         # define second layer
         self.conv2 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
             },
             aggr='mean',
         )
@@ -48,12 +67,15 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         # Classifier for binary classification (output of size 1), consider extra input for edge info
         self.classifier = torch.nn.Linear(out_channels * num_heads, 1)
+        
+        # # Separate processing for 'package_name' if necessary
+        # self.package_name_classifier = torch.nn.Linear(1, 1)
 
-
-    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch, node_type):
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch, node_types):
         '''
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
+
         '''
         # apply edge masks
         masked_edge_index_dict = {
@@ -69,51 +91,66 @@ class MaskedHeteroGAT(torch.nn.Module):
             for key, x in x_dict.items()
         }
 
-        # perform GAT layer
-        x_dict = self.conv1(masked_x_dict, masked_edge_index_dict)
-        x_dict = {key: F.relu(x) for key, x in x_dict.items()}
-        x_dict = self.conv2(x_dict, masked_edge_index_dict)
+        node_type_outputs = []
 
-        # apply diffpool to hierarchical node embeddings
-        x_pooled, edge_pooled, batch_pooled = self.diffpool(
-            x_dict[node_type], masked_edge_index_dict[node_type], batch)
+        # process other node types (excluding "Package_Name")
+        for node_type in node_types:
+            if node_type != "Package_Name":
 
-        # aggregate edge features
-        agg_edge = self.agg_edge_features(edge_att_dict)
+                # perform GAT layer
+                x_dict = self.conv1(masked_x_dict, masked_edge_index_dict)
+                x_dict = {key: F.relu(x) for key, x in x_dict.items()}
+                x_dict = self.conv2(x_dict, masked_edge_index_dict)
+
+                # apply diffpool to hierarchical node embeddings
+                x_pooled, edge_pooled, batch_pooled = self.diffpool(
+                    x_dict[node_type], masked_edge_index_dict[node_type], batch)
+
+                node_type_outputs.append(x_pooled)
+
+        # use the last pooled node features for classificaton
+        final_embed = node_type_outputs[-1]
+
+        # aggregate edge features 
+        agg_edge = self.agg_edge_features(edge_attr_dict)
 
         # pass through classification process for graph-level input
-        probs = self.subgraph_cls(x_pooled, agg_edge, batch_pooled)
+        probs = self.subgraph_cls(final_embed, agg_edge)
 
         return probs
         
 
-    def subgraph_cls(self, x_pooled, edge_dict, batch_pooled):
+    def subgraph_cls(self, final_embed, agg_edge):
         ''' process node feature at graph-level for binary classification
 
         :param x_pooled: pooled node features from DiffPool
         :param edge_dict: aggregated edge features
-        :param batch_pooled: updated batch indices after DiffPool
         '''
         # Concatenate aggregated edge info with pooled node features
-        x = torch.cat([x_pooled, edge_dict.view(-1, 1)], dim=-1)
+        # x = torch.cat([x_pooled, edge_dict.view(-1, 1)], dim=-1)
 
-        # Pass concatenated features through the classifier
+        # Concatenate pooled node features with aggregated edge features
+        x = torch.cat([final_embed, agg_edge.view(-1, 1)], dim=-1)  # Ensure edge features are 2D
+
+        # Pass the concatenated features through the classifier
         logits = self.classifier(x)
 
         # Apply sigmoid for binary classification
         probs = torch.sigmoid(logits)
-        return probs  
+        return probs
 
 
-    def agg_edge_features(self, edge_attr_dict, edge_pooled):
+    def agg_edge_features(self, edge_attr_dict):
         ''' aggregate edge attribute globally
 
         '''
+        # Aggregate the edge attributes by computing the mean for each edge type
         agg_edges = [
-            edge_attr.mean() for key, edge_attr in edge_attr_dict.items()
+            edge_attr.mean(dim=0) for edge_attr in edge_attr_dict.values()
         ]
 
-        return edge_pooled if edge_pooled is not None else torch.tensor(agg_edges)
+        # If edge_pooled is available, use it instead
+        return torch.cat(agg_edges, dim=-1) if len(agg_edges) > 0 else None
 
 
     def ext_node_att(self, ):
@@ -122,7 +159,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         '''
         # normalize node mask values
         node_att = self.node_mask.detach().cpu()
-        norm_node_att = node_att / mode_att.sum()
+        norm_node_att = node_att / node_att.sum()
 
         return norm_node_att
 
@@ -142,7 +179,7 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         '''
         ranked_indicies = torch.argsort(att_values, descending=True)
-        return att_values[rank_indicies]
+        return att_values[ranked_indicies]
 
     def compute_loss(self, probs, labels):
         ''' compute the total loss, including BCE loss and regularization
@@ -163,18 +200,18 @@ def mask_regularization(edge_mask, node_mask, lambda_reg=0.01):
 
 
 class HeteroGAT(torch.nn.Module):
-    def __init__(self, metadata, hidden_channels, out_channels, num_heads):
+    def __init__(self, hidden_channels, out_channels, num_heads):
         super(HeteroConv, self).__init__()
 
         # define first layer
         self.conv1 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads),
             },
             aggr='mean',
         )
@@ -182,12 +219,12 @@ class HeteroGAT(torch.nn.Module):
         # define second layer
         self.conv2 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATConv((-1，-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1，-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads),
             },
             aggr='mean',
         )
@@ -195,14 +232,17 @@ class HeteroGAT(torch.nn.Module):
         # add final projection layer to output logits for binary classification
         self.classifier = nn.Linear(out_channels, 1)
         # Binary cross-entropy loss with optional class weighting
-        self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([class_weight]) if class_weight else None)
+        self.loss_fn = nn.BCEWithLogitsLoss()
 
 
-    def forward(self, x_dict, edge_index_dict):
+    def forward(self, batch):
         '''
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
         '''
+
+        x_dict, edge_index_dict = batch.x_dict, batch.edge_index_dict
+
         x_dict = self.conv1(x_dict, edge_index_dict)
         x_dict = {key: torch.relu(x) for key, x in x_dict.items()}
         x_dict = self.conv2(x_dict, edge_index_dict)
@@ -214,24 +254,24 @@ class HeteroGAT(torch.nn.Module):
 
         return logit_dict
     
-    def compute_loss(self, logic_dict, y_dict):
+    def compute_loss(self, logit_dict, batch):
         ''' computer the binary classification loss
 
-        :param logic_dict: dictionary of logits for each node type
+        :param logit_dict: dictionary of logits for each node type
         :param x_dictL the dictionary of ground truth labels for each node type
         
         return: total loss across all node types
         '''
         loss = 0
-        for node_type in logic_dict:
-            if node_type in y_dict:
-                y_pred = logic_dict[node_type]
-                y_true = y_dict[node_type].float()
+        for node_type in logit_dict:
+            if hasattr(batch[node_type], 'y'):
+                y_pred = logit_dict[node_type]
+                y_true = batch[node_type].y.float()
                 loss += self.loss_fn(y_pred, y_true)
 
         return loss
 
-    def train_model(self, x_dict, edge_index_dict, y_dict, optimizer, num_epochs=100):
+    def train_model(self, dataloader, optimizer, num_epochs=100):
         ''' train model and print performance
         Args:
             x_dict: Node features.
@@ -244,16 +284,91 @@ class HeteroGAT(torch.nn.Module):
         # loop in epochs
         for epoch in range(num_epochs):
             self.train()
-            optimizer.zero_grad()
+            total_loss = 0
 
-            # forward pass
-            logic_dict = self.forward(x_dict, edge_index_dict)
+            for batch in dataloader:
+                batch = batch.to(next(self.parameters()).device)  # Move batch to the same device as model
+                optimizer.zero_grad()
 
-            # compute loss
-            loss = self.compute_loss(logic_dict, y_dict)
+                # forward pass
+                logic_dict = self.forward(batch)
+                # compute loss
+                loss = self.compute_loss(logic_dict, batch)
 
-            # backward pass and optimization
-            loss.backward()
-            optimizer.step()
+                # backward pass and optimization
+                loss.backward()
+                optimizer.step()
 
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}")
+                total_loss += loss.item()
+            
+            avg_loss = total_loss/len(dataloader)
+
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+
+if __name__ == "__main__":
+
+    data_path = Path.cwd().parent.joinpath("ext", "test")
+    dataset = LabeledSubGraphs(root=data_path, batch_size = 10)
+    # load one .pt file at a time
+    dataloader = DataLoader(dataset, batch_size = 1, suffle=True)
+    batch=next(iter(dataloader))
+
+
+    # training loop
+    device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
+
+    model2 = HeteroGAT(
+        hidden_channels=64,
+        out_channels=64,
+        num_heads=4
+    ).to(device)
+
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
+
+    for epoch in range(10):
+        total_loss = 0
+        model2.train_model(dataloader, optimizer2)
+
+    # Initialize model with required parameters
+    # model1 = MaskedHeteroGAT(
+    #     hidden_channels=64, 
+    #     out_channels=64, 
+    #     num_heads=4, 
+    #     num_clusters=20, 
+    #     num_edges = batch.num_edges, 
+    #     num_nodes= batch.num_nodes   
+    # ).to(device)
+
+    # optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
+
+    # # predefined node types
+    # node_types = ["Path", "Hostname", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+
+    # for epoch in range(10):
+    #     total_loss = 0
+    #     for batch in dataloader:
+    #         batch=batch.to(device)
+
+    #         # extract necessary input from the batch
+    #         x_dict = batch.x_dict
+    #         edge_index_dict = batch.edge_index_dict
+    #         edge_attr_dict = batch.edge_attr_dict
+    #         batch_indices = batch.batch_dict
+            
+    #         optimizer.zero_grad()
+    #         probs = model1(x_dict, edge_index_dict, edge_attr_dict, batch_indices, node_types)
+            
+    #         labels = batch.y.to(device)
+    #         loss = model1(probs, labels)
+    #         loss.backward()
+    #         optimizer.step()
+
+    #         total_loss += loss.item()
+
+    # print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
+   
+
+
+
+    
