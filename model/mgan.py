@@ -311,62 +311,62 @@ if __name__ == "__main__":
     data_path = Path.cwd().parent.joinpath("ext", "test")
     dataset = LabeledSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
-    dataloader = DataLoader(dataset, batch_size = 1, suffle=True)
+    dataloader = DataLoader(dataset, batch_size = 1, shuffle=True)
     batch=next(iter(dataloader))
 
 
     # training loop
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-    model2 = HeteroGAT(
-        hidden_channels=64,
-        out_channels=64,
-        num_heads=4
-    ).to(device)
-
-    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
-
-    for epoch in range(10):
-        total_loss = 0
-        model2.train_model(dataloader, optimizer2)
-
-    # Initialize model with required parameters
-    # model1 = MaskedHeteroGAT(
-    #     hidden_channels=64, 
-    #     out_channels=64, 
-    #     num_heads=4, 
-    #     num_clusters=20, 
-    #     num_edges = batch.num_edges, 
-    #     num_nodes= batch.num_nodes   
+    # model2 = HeteroGAT(
+    #     hidden_channels=64,
+    #     out_channels=64,
+    #     num_heads=4
     # ).to(device)
 
-    # optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
-
-    # # predefined node types
-    # node_types = ["Path", "Hostname", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+    # optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
 
     # for epoch in range(10):
     #     total_loss = 0
-    #     for batch in dataloader:
-    #         batch=batch.to(device)
+    #     model2.train_model(dataloader, optimizer2)
 
-    #         # extract necessary input from the batch
-    #         x_dict = batch.x_dict
-    #         edge_index_dict = batch.edge_index_dict
-    #         edge_attr_dict = batch.edge_attr_dict
-    #         batch_indices = batch.batch_dict
+    # Initialize model with required parameters
+    model1 = MaskedHeteroGAT(
+        hidden_channels=64, 
+        out_channels=64, 
+        num_heads=4, 
+        num_clusters=20, 
+        num_edges = batch.num_edges, 
+        num_nodes= batch.num_nodes   
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
+
+    # predefined node types
+    node_types = ["Path", "Hostname", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+
+    for epoch in range(10):
+        total_loss = 0
+        for batch in dataloader:
+            batch=batch.to(device)
+
+            # extract necessary input from the batch
+            x_dict = batch.x_dict
+            edge_index_dict = batch.edge_index_dict
+            edge_attr_dict = batch.edge_attr_dict
+            batch_indices = batch.batch_dict
             
-    #         optimizer.zero_grad()
-    #         probs = model1(x_dict, edge_index_dict, edge_attr_dict, batch_indices, node_types)
+            optimizer.zero_grad()
+            probs = model1(x_dict, edge_index_dict, edge_attr_dict, batch_indices, node_types)
             
-    #         labels = batch.y.to(device)
-    #         loss = model1(probs, labels)
-    #         loss.backward()
-    #         optimizer.step()
+            labels = batch.y.to(device)
+            loss = model1(probs, labels)
+            loss.backward()
+            optimizer.step()
 
-    #         total_loss += loss.item()
+            total_loss += loss.item()
 
-    # print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
+    print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
    
 
 
