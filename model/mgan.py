@@ -13,6 +13,7 @@ from model import DiffPool
 from torch_geometric import nn
 import torch.nn.functional as F
 from ext.data_create import LabeledSubGraphs
+from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
 
 
@@ -194,6 +195,7 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         return bce_loss + reg_loss
 
+
 # regularization term to encourage sparsity
 def mask_regularization(edge_mask, node_mask, lambda_reg=0.01):
     return lambda_reg * (torch.sum(torch.abs(edge_mask)) + torch.sum(torch.abs(node_mask)))
@@ -271,64 +273,50 @@ class HeteroGAT(torch.nn.Module):
 
         return loss
 
-    def train_model(self, dataloader, optimizer, num_epochs=100):
-        ''' train model and print performance
-        Args:
-            x_dict: Node features.
-            edge_index_dict: Edge indices for each edge type.
-            y_dict: Ground truth labels.
-            optimizer: Optimizer for the model.
-            num_epochs: Number of training epochs.
-
-        '''
-        # loop in epochs
-        for epoch in range(num_epochs):
-            self.train()
-            total_loss = 0
-
-            for batch in dataloader:
-                batch = batch.to(next(self.parameters()).device)  # Move batch to the same device as model
-                optimizer.zero_grad()
-
-                # forward pass
-                logic_dict = self.forward(batch)
-                # compute loss
-                loss = self.compute_loss(logic_dict, batch)
-
-                # backward pass and optimization
-                loss.backward()
-                optimizer.step()
-
-                total_loss += loss.item()
-            
-            avg_loss = total_loss/len(dataloader)
-
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
-
 
 if __name__ == "__main__":
 
-    data_path = Path.cwd().parent.joinpath("ext", "test")
-    dataset = LabeledSubGraphs(root=data_path, batch_size = 10)
+    data_path = Path.cwd().parent.joinpath("ext", "test", "processed")
+
+    dataset = IterSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
-    dataloader = DataLoader(dataset, batch_size = 1, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size = 1, shuffle=False)
+    device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
     batch=next(iter(dataloader))
 
+    model2 = HeteroGAT(
+        hidden_channels=64,
+        out_channels=64,
+        num_heads=4
+    ).to(device)
 
-    # training loop
-    device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
+    num_epochs = 100
+    for epoch in range(num_epochs):
+        model2.train()
+        total_loss = 0
 
-    # model2 = HeteroGAT(
-    #     hidden_channels=64,
-    #     out_channels=64,
-    #     num_heads=4
-    # ).to(device)
+        for batch in dataloader:
+            batch = batch.to(next(model2.parameters()).device)  # Move batch to the same device as model
+            optimizer2.zero_grad()
 
-    # optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
+            # forward pass
+            logic_dict = model2.forward(batch)
+            # compute loss
+            loss = model2.compute_loss(logic_dict, batch)
 
-    # for epoch in range(10):
-    #     total_loss = 0
-    #     model2.train_model(dataloader, optimizer2)
+            # backward pass and optimization
+            loss.backward()
+            optimizer2.step()
+
+            total_loss += loss.item()
+        
+        avg_loss = total_loss/len(dataloader)
+
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+    torch.save(model2, "heterogat_model.pth")
+
 
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
@@ -366,8 +354,10 @@ if __name__ == "__main__":
 
             total_loss += loss.item()
 
-    print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
-   
+        print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
+
+    # save the model after training
+    torch.save(model1, "masked_heterogat_model.pth")
 
 
 

@@ -129,3 +129,6 @@ class EcosystemFeatureAnalysis:
         return top_intra_edges, top_inter_edges, top_nodes
     
 
+
+if __name__ == "__main__":
+    

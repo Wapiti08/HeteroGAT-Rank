@@ -49,6 +49,10 @@ class DistributedTrainer:
     def cleanup():
         dist.destroy_process_group()
 
+    @staticmethod
+    def save_model(model, path):
+        torch.save(model.state_dict(), path)
+
     def train(self, rank):
         # setup
         self.setup(rank, self.world_size)
@@ -97,6 +101,8 @@ class DistributedTrainer:
 
         # cleanup
         self.cleanup()
+        
+        return model
 
     def dist_train(self):
         ''' spawan multiple processes for distributed training 
@@ -108,10 +114,16 @@ class DistributedTrainer:
             nprocs=self.world_size,
             join=True
         )
+    
+
 
 if __name__ == "__main__":
 
-
+    # load model class
     model_class_1 = mgan.MaskedHeteroGAT()
+    # load data parameters
 
+    DistributedTrainer()
     
+    # save trained model
+    save_model()
