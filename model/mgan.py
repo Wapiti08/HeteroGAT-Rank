@@ -72,7 +72,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         # # Separate processing for 'package_name' if necessary
         # self.package_name_classifier = torch.nn.Linear(1, 1)
 
-    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch, node_types):
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch, node_types, **kwargs):
         '''
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
@@ -237,7 +237,7 @@ class HeteroGAT(torch.nn.Module):
         self.loss_fn = nn.BCEWithLogitsLoss()
 
 
-    def forward(self, batch):
+    def forward(self, batch, **kwargs):
         '''
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
