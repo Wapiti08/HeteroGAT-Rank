@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from ext.data_create import LabeledSubGraphs
 from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
-
+from datetime import datetime
 
 class MaskedHeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):
@@ -36,16 +36,16 @@ class MaskedHeteroGAT(torch.nn.Module):
     
         # GAT layers
         self.conv1 = HeteroConv(
-                    {
-                        ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                        ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                        ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                        ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                        ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                        ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                    },
-                    aggr='mean',  # aggregation method for multi-head attention
-                )
+            {
+                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+            },
+            aggr='mean',  # aggregation method for multi-head attention
+        )
 
         # define second layer
         self.conv2 = HeteroConv(
@@ -284,6 +284,7 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
     batch=next(iter(dataloader))
 
+    
     model2 = HeteroGAT(
         hidden_channels=64,
         out_channels=64,
@@ -291,7 +292,10 @@ if __name__ == "__main__":
     ).to(device)
 
     optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
-    num_epochs = 100
+    num_epochs = 10
+
+    # define the starting time
+    start_time = datetime.now()
     for epoch in range(num_epochs):
         model2.train()
         total_loss = 0
@@ -315,6 +319,7 @@ if __name__ == "__main__":
 
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
 
+    print(f"Time spent for HeteroGAT is: {start_time - datetime.now()}")
     torch.save(model2, "heterogat_model.pth")
 
 
@@ -333,7 +338,9 @@ if __name__ == "__main__":
     # predefined node types
     node_types = ["Path", "Hostname", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 
-    for epoch in range(10):
+    # define the starting time
+    start_time = datetime.now()
+    for epoch in range(num_epochs):
         total_loss = 0
         for batch in dataloader:
             batch=batch.to(device)
@@ -355,7 +362,7 @@ if __name__ == "__main__":
             total_loss += loss.item()
 
         print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
-
+    print(f"Time spent for MaskedHeteroGAT is: {start_time - datetime.now()}")
     # save the model after training
     torch.save(model1, "masked_heterogat_model.pth")
 

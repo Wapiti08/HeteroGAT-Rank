@@ -20,6 +20,7 @@ from model import mgan
 from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
 from mgan import *
+from datetime import datetime
 
 class DistributedTrainer:
     def __init__(self, model_class, model_kwargs: dict, x_dict: dict, edge_index_dict: dict, \
@@ -72,7 +73,7 @@ class DistributedTrainer:
                 "node_types": node_types
             }
 
-        elif isinstance(model, HeteroConv):
+        elif isinstance(model, HeteroGAT):
             return {"batch": batch}
         else:
             raise ValueError(f"Unsupported model type: {type(model)}")
@@ -136,7 +137,7 @@ class DistributedTrainer:
             save_path = Path("dis_trained_maskhetermodel.pth")
    
 
-        elif rank == 0 and isinstance(model, HeteroConv):
+        elif rank == 0 and isinstance(model, HeteroGAT):
             save_path = Path("dis_trained_hetermodel.pth")
         
         # model.module refers to the original model
@@ -195,10 +196,11 @@ if __name__ == "__main__":
 
     # load model class
     model_class_1 = MaskedHeteroGAT
-    model_class_2 = HeteroConv
+    model_class_2 = HeteroGAT
 
-    num_epochs = 100
+    num_epochs = 10
     world_size = torch.cuda.device_count() if torch.cuda.is_available() else 1
+
 
     # create distributedtrainer instance
     trainer1 = DistributedTrainer(
@@ -210,8 +212,10 @@ if __name__ == "__main__":
         num_epochs=num_epochs,
         world_size=world_size
     )
-
+    # define the starting time
+    start_time = datetime.now()
     trainer1.dist_train()
+    print(f"Time spent for MaskedHeteroGAT in distributed setting up is: {start_time - datetime.now()}")
 
     # create distributedtrainer instance
     trainer2 = DistributedTrainer(
@@ -223,6 +227,9 @@ if __name__ == "__main__":
         num_epochs=num_epochs,
         world_size=world_size
     )
-
+    # define the starting time
+    start_time = datetime.now()
     trainer2.dist_train()
+    print(f"Time spent for HeteroGAT in distributed setting up is: {start_time - datetime.now()}")
+
     
