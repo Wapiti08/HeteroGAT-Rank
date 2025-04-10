@@ -276,15 +276,15 @@ class HeteroGAT(torch.nn.Module):
 
 if __name__ == "__main__":
 
-    data_path = Path.cwd().parent.joinpath("ext", "test", "processed")
-
+    data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
+    print("Creating iterative dataset")
     dataset = IterSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
+    print("Creating subgraph dataloader")
     dataloader = DataLoader(dataset, batch_size = 1, shuffle=False)
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
     batch=next(iter(dataloader))
 
-    
     model2 = HeteroGAT(
         hidden_channels=64,
         out_channels=64,
@@ -294,6 +294,7 @@ if __name__ == "__main__":
     optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
     num_epochs = 10
 
+    print("Training HeteroGAT ...")
     # define the starting time
     start_time = datetime.now()
     for epoch in range(num_epochs):
@@ -322,7 +323,7 @@ if __name__ == "__main__":
     print(f"Time spent for HeteroGAT is: {start_time - datetime.now()}")
     torch.save(model2, "heterogat_model.pth")
 
-
+    print("Training MaskedHeteroGAT ...")
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
         hidden_channels=64, 

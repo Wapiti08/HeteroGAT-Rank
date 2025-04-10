@@ -15,7 +15,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import Dataloader, DistributedSampler
+from torch.utils.data import DistributedSampler
 from model import mgan
 from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
@@ -94,7 +94,7 @@ class DistributedTrainer:
         # wrap data in distributedsampler --- define an example
         sampler = DistributedSampler(list(self.x_dict.keys()), shuffle=True)
 
-        dataloader = Dataloader(
+        dataloader = DataLoader(
                 list(self.x_dict.keys()),
                 batch_size = 1,
                 sampler = sampler)
@@ -164,10 +164,14 @@ if __name__ == "__main__":
 
     # load data parameters
     ## load data batch to get the number of edges and nodes
-    data_path = Path.cwd().parent.joinpath("ext", "test", "processed")
-
-    dataset = IterSubGraphs(root=data_path, batch_size = 10)
+    data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
+    
+    # for test, change batch size from 10 to 1
+    print("Creating iterative dataset")
+    dataset = IterSubGraphs(root=data_path, batch_size = 1)
+    
     ## load one .pt file at a time
+    print("Creating subgraph dataloader")
     dataloader = DataLoader(dataset, batch_size = 1, shuffle=False)
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
     batch=next(iter(dataloader))
@@ -201,7 +205,7 @@ if __name__ == "__main__":
     num_epochs = 10
     world_size = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
-
+    print("Training MaskedHeteroGAT ...")
     # create distributedtrainer instance
     trainer1 = DistributedTrainer(
         model_class=model_class_1,
@@ -217,6 +221,7 @@ if __name__ == "__main__":
     trainer1.dist_train()
     print(f"Time spent for MaskedHeteroGAT in distributed setting up is: {start_time - datetime.now()}")
 
+    print("Training HeteroGAT ...")
     # create distributedtrainer instance
     trainer2 = DistributedTrainer(
         model_class=model_class_2,
