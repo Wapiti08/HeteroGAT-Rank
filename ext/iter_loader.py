@@ -35,6 +35,8 @@ import pickle
 import numpy as np
 from torch_geometric.transforms import Pad
 from tqdm import tqdm
+from torch.utils.data import get_worker_info
+
 
 # Initialize Ray (Make sure this is done once at the start of your script)
 ray.init(ignore_reinit_error=True)
@@ -55,10 +57,21 @@ class IterSubGraphs(IterableDataset):
 
     def __iter__(self):
         ''' yields batches one at a time to minimize moemory usage
-        
+        split file list per workder to avoid looping on the same list for all workers
         '''
-        for file_path in tqdm(self.file_list,desc="load ray object into batching subgraphs", \
-                              len=len(self.file_list)):
+        worker_info = get_worker_info()
+        # single worker
+        if worker_info is None:
+            file_list = self.file_list
+        
+        else:
+            total = len(self.file_list)
+            per_worker = int(np.ceil(total / worker_info.num_workers))
+            start = worker_info.id * per_worker
+            end = min(start + per_worker, total)
+            file_list = self.file_list[start:end]
+
+        for file_path in file_list:
             batch = torch.load(file_path, map_location="cpu")
             
             # Ensure batch is resolved if stored as Ray ObjectRefs
@@ -76,12 +89,18 @@ class IterSubGraphs(IterableDataset):
 
 if __name__ == "__main__":
     # load pickle format of graph dataset with graph representations
-    data_path = Path.cwd().joinpath("test", "processed")
+    data_path = Path.cwd().joinpath("test-small", "processed")
 
     # create an instance of the dataset
     dataset = IterSubGraphs(root=data_path, batch_size=10)
 
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    dataloader = DataLoader(
+            dataset, 
+            batch_size = 1, 
+            shuffle=False, 
+            num_workers=20,
+            persistent_workers=True
+            )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

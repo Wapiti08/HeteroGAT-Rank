@@ -281,7 +281,14 @@ if __name__ == "__main__":
     dataset = IterSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
     print("Creating subgraph dataloader")
-    dataloader = DataLoader(dataset, batch_size = 1, shuffle=False)
+    dataloader = DataLoader(
+            dataset, 
+            batch_size = 1, 
+            shuffle=False, 
+            num_workers=20,
+            persistent_workers=True
+            )
+    
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
     batch=next(iter(dataloader))
 
