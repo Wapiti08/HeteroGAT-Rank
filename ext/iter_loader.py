@@ -1,114 +1,107 @@
-'''
- # @ Create Time: 2024-12-18 09:27:11
- # @ Modified time: 2024-12-18 09:27:14
- # @ Description: create graph dataset suitable for GNN model training in pytorch in multiple steps (reduce one-time memory cost)
- 
-node: {
-    'value': str content / numeric,
-    "type": Package_Name | Path | IP | Hostname | Hostnames | Command | Port --- str content
-    "eco": cate
- }
-
- edge: {
-    "source": str content,
-    "target": str content,
-    "value": str content,
-    "type": action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
- }
- 
- '''
-
 import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
-import ray
 import os
-import os.path as osp
 import torch
-from torch_geometric.data import HeteroData, Dataset, Batch
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, get_worker_info
 from torch_geometric.loader import DataLoader
-import pickle
-import pandas as pd
-from pathlib import Path
-import pickle
 import numpy as np
-from torch_geometric.transforms import Pad
-from tqdm import tqdm
-from torch.utils.data import get_worker_info
+import time
 
-
-# Initialize Ray (Make sure this is done once at the start of your script)
-ray.init(ignore_reinit_error=True)
+try:
+    import ray
+    ray.init(ignore_reinit_error=True, include_dashboard=False)
+    use_ray = True
+except ImportError:
+    print("Ray not installed, continuing without Ray.")
+    use_ray = False
 
 class IterSubGraphs(IterableDataset):
     
     def __init__(self, root, batch_size=10, transform=None):
-        '''
-        :param root: root directory where the dataset is stored
-        :param batch_size: number of subgraphs to store in a single file
-        :param transform: a function/transform applied to data objects
-        '''
         self.batch_size = batch_size
-        self.data_path = root
+        self.data_path = Path(root)
         self.file_list = sorted(self.data_path.glob("batch_*.pt"))
         self.transform = transform
-
+        print(f"[Init] Found {len(self.file_list)} files in {self.data_path}")
 
     def __iter__(self):
-        ''' yields batches one at a time to minimize moemory usage
-        split file list per workder to avoid looping on the same list for all workers
-        '''
+
         worker_info = get_worker_info()
-        # single worker
         if worker_info is None:
             file_list = self.file_list
-        
+            print("[Iter] Running in main process")
         else:
             total = len(self.file_list)
             per_worker = int(np.ceil(total / worker_info.num_workers))
             start = worker_info.id * per_worker
             end = min(start + per_worker, total)
             file_list = self.file_list[start:end]
+            print(f"[Worker {worker_info.id}] Processing files {start} to {end}")
 
         for file_path in file_list:
-            batch = torch.load(file_path, map_location="cpu")
-            
-            # Ensure batch is resolved if stored as Ray ObjectRefs
-            if isinstance(batch, ray.ObjectRef):
+            print(f"[Iter] Loading {file_path.name}")
+            try:
+                batch = torch.load(file_path, map_location="cpu")
+                print(f"[Iter] Loaded {file_path.name}")
+            except Exception as e:
+                print(f"[Iter] Failed to load {file_path.name}: {e}")
+                continue
+
+            if use_ray and isinstance(batch, ray.ObjectRef):
                 batch = ray.get(batch)
+                print(f"[Worker {worker_info.id if worker_info else 0}] Retrieved from ray.ObjectRef")
+
+            # Optional: check type and size
+            print(f"[Iter] batch type: {type(batch)}")
+            print(f"[Iter] batch keys: {batch.keys() if hasattr(batch, 'keys') else 'N/A'}")
 
             if self.transform:
                 batch = self.transform(batch)
-            yield batch
+                print("[Iter] Transform applied")
 
+            yield batch
+            print("[Iter] Yielded one batch")
 
     def __len__(self):
         return len(self.file_list)
 
 
 if __name__ == "__main__":
-    # load pickle format of graph dataset with graph representations
-    data_path = Path.cwd().joinpath("test-small", "processed")
+    import argparse
+    from pathlib import Path
 
-    # create an instance of the dataset
+    data_path = Path.cwd().joinpath("test-small", "processed")
+    
     dataset = IterSubGraphs(root=data_path, batch_size=10)
 
     dataloader = DataLoader(
-            dataset, 
-            batch_size = 1, 
-            shuffle=False, 
-            num_workers=20,
-            persistent_workers=True
-            )
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=4,  # Reduce to test performance; 20 may be overkill for file I/O
+        persistent_workers=True,
+        prefetch_factor=2
+    )
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    for batch in dataloader:
-        batch = batch[0].to(device)
-        print(batch)
-        break
+    print("[Main] Starting dataloader iteration...")
 
-    
-    
+    try:
+        for idx, batch in enumerate(dataloader):
+            print(f"[Main] --- BATCH {idx} RECEIVED ---")
+            
+            if isinstance(batch, list) or isinstance(batch, tuple):
+                print(f"[Main] batch is a {type(batch)} of len={len(batch)}")
+                print(f"[Main] batch[0] type: {type(batch[0])}")
+                print(f"[Main] batch[0] keys: {batch[0].keys() if hasattr(batch[0], 'keys') else 'N/A'}")
+            else:
+                print(f"[Main] batch type: {type(batch)}")
+                print(f"[Main] batch keys: {batch.keys() if hasattr(batch, 'keys') else 'N/A'}")
 
+            time.sleep(0.5)  # simulate some processing time
+            break
+
+    except Exception as e:
+        print(f"[ERROR] DataLoader iteration failed: {e}")
