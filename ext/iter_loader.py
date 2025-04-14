@@ -12,9 +12,11 @@ try:
     import ray
     ray.init(ignore_reinit_error=True, include_dashboard=False)
     use_ray = True
+    ray_ObjectRef = ray.ObjectRef  # Save for isinstance checks
 except ImportError:
     print("Ray not installed, continuing without Ray.")
     use_ray = False
+    ray_ObjectRef = type(None)  # Dummy fallback type
 
 class IterSubGraphs(IterableDataset):
     
