@@ -10,7 +10,7 @@ sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv
 from model import DiffPool
-from torch_geometric import nn
+from torch import nn
 import torch.nn.functional as F
 from ext.data_create import LabeledSubGraphs
 from ext.iter_loader import IterSubGraphs
@@ -37,12 +37,12 @@ class MaskedHeteroGAT(torch.nn.Module):
         # GAT layers
         self.conv1 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
             },
             aggr='mean',  # aggregation method for multi-head attention
         )
@@ -50,12 +50,12 @@ class MaskedHeteroGAT(torch.nn.Module):
         # define second layer
         self.conv2 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
             },
             aggr='mean',
         )
@@ -203,17 +203,17 @@ def mask_regularization(edge_mask, node_mask, lambda_reg=0.01):
 
 class HeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads):
-        super(HeteroConv, self).__init__()
+        super(HeteroGAT, self).__init__()
 
         # define first layer
         self.conv1 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
             },
             aggr='mean',
         )
@@ -221,12 +221,12 @@ class HeteroGAT(torch.nn.Module):
         # define second layer
         self.conv2 = HeteroConv(
             {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads),
-                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads),
+                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
             },
             aggr='mean',
         )
