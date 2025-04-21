@@ -32,7 +32,11 @@ from pathlib import Path
 import pickle
 import numpy as np
 from torch_geometric.transforms import Pad
-import hashlib
+from tqdm import tqdm
+
+# # Ray is properly initialized before any remote functions are called
+if ray.is_initialized():
+    ray.shutdown()
 
 def generate_node_id(row):
     '''
@@ -75,12 +79,12 @@ def prepare_encode_jobs(subgraph_batch):
     # cache of node DataFrames keyed by their id()
     node_dataframes = {}
 
-    for subgraph in subgraph_batch:
+    for i, subgraph in enumerate(subgraph_batch):
         # convert list of node dicts into a DataFrame, drop row with all NaNs
         nodes = pd.DataFrame(subgraph['nodes']).dropna()
         nodes['id'] = nodes.apply(generate_node_id, axis=1)
         nodes.set_index('id', inplace=True)
-        node_dataframes[id(nodes)] = nodes
+        node_dataframes[i] = nodes
 
         # group by node type to handle different encoding strategies
         for node_type, group in nodes.groupby('type'):
@@ -90,7 +94,7 @@ def prepare_encode_jobs(subgraph_batch):
                 df['value'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
             encode_jobs.append((df, job_type))
             # Track the mapping of nodes for later reconstruction or alignment
-            node_type_map.append((id(nodes), node_type, len(group)))
+            node_type_map.append((i, node_type, len(group)))
 
     return encode_jobs, node_type_map, node_dataframes
 
@@ -126,7 +130,7 @@ def construct_hetero_data(subgraph, nodes, edges, node_features, feature_dim):
         hetero_data[node_type].num_nodes = feats.size(0)
     
     # filter out edges with missing nodes
-    valid_edges = edges['sources'].isin(nodes.index) & edges['target'].isin(nodes.index)
+    valid_edges = edges['source'].isin(nodes.index) & edges['target'].isin(nodes.index)
     edges = edges[valid_edges]
 
     # group edges by edge type
@@ -167,16 +171,35 @@ class EncoderActor:
         self.seq_encoder = fea_encoder.SequenceEncoder()
         self.iden_encoder = fea_encoder.IdentityEncoder(dtype=torch.float, \
                                                         output_dim=self.seq_encoder.embedding_dim)
+        self._is_shutdown = False
 
     def encode_batch(self, df_list):
-        results = []
-        for df, encoder_type in df_list:
-            if encoder_type == "seq":
-                results.append(self.seq_encoder(df))
-            else:
-                results.append(self.iden_encoder(df))
-        
-        return results
+        try:
+            print("=== Entered encode_batch ===")
+            results = []
+            for idx, (df, encoder_type) in enumerate(df_list):
+                print(f"  [Job {idx}] Type: {encoder_type}, Shape: {df.shape}")
+                if encoder_type == "seq":
+                    encoded = self.seq_encoder(df)
+                else:
+                    encoded = self.iden_encoder(df)
+                print(f"  [Job {idx}] Encoded shape: {encoded.shape}")
+                results.append(encoded)
+            return results
+        except Exception as e:
+            print("!!! Exception inside encode_batch:", e)
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def shutdown(self):
+        # Prevent shutdown if it's already done
+        if not self._is_shutdown:
+            print("Shutting down encoder actor...")
+            self._is_shutdown = True
+            ray.actor.exit_actor()
+        else:
+            print("Encoder actor is already shut down.")
 
 @ray.remote
 def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_per_type: dict, \
@@ -192,6 +215,8 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
     return:
         torch_geometric.data.Batch: A batch of padded heterogeneous graph data objects.
     '''
+    print(f"Inside process_subgraphs with batch size: {len(subgraph_batch)}")
+
     # Initialize the Pad transform with the calculated max values
     pad_transform = Pad(max_num_nodes=max_nodes_per_type, max_num_edges=max_edges_per_type)
 
@@ -202,6 +227,8 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
     encode_jobs, node_type_map, node_dataframes = prepare_encode_jobs(subgraph_batch)
     # run encoding jobs using Ray and collect encoded results
     encoded_batches = ray.get(encoder_actor.encode_batch.remote(encode_jobs))
+    #!! make sure actor is shutdown properly after calling them
+    # ray.get(encoder_actor.shutdown.remote())
     # decode results into a dict
     node_features_dict = decode_encoded_features(encoded_batches, node_type_map)
 
@@ -212,11 +239,21 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
         edges = pd.DataFrame(subgraph['edges']).dropna(subset=['source', 'target'])
 
         # Use ID of nodes DataFrame to fetch corresponding encoded features
-        graph_id = id(nodes)
-        node_features = node_features_dict.get(graph_id, {})
+        node_features = node_features_dict.get(i, {})
+
         # Determine feature dimension from the first non-empty feature dict
-        if node_features and feature_dim is None:
-            feature_dim = next(iter(node_features.values())).size(1)
+        if not node_features:
+            print(f"[Subgraph {i}] Skipping: no features found.")
+            continue  # Skip this subgraph
+        
+        if feature_dim is None:
+            first_tensor = next(iter(node_features.values()), None)
+            if first_tensor is not None:
+                feature_dim = first_tensor.size(1)
+                print(f"[Subgraph {i}] feature_dim set to: {feature_dim}")
+            else:
+                print(f"[Subgraph {i}] No valid feature tensor found. Skipping.")
+                continue
 
         try:
             # Build a PyG HeteroData object from raw data + encoded features
@@ -226,9 +263,13 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
             hetero_data = apply_padding(hetero_data, all_node_types, feature_dim, max_nodes_per_type, pad_transform)
             data_list.append(hetero_data)
         except Exception as e:
-            print(f"Error processing subgraph {i}: {e}")
+            print(f"[Subgraph {i}] Error: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
-
+        
+    if not data_list:
+        raise ValueError("No valid subgraphs were processed — `data_list` is empty.")
     return Batch.from_data_list(data_list)
 
 
@@ -290,6 +331,12 @@ class LabeledSubGraphs(Dataset):
 
         return max_nodes_per_type, max_edges_per_type
 
+    @staticmethod
+    def get_max_parallel_tasks(task_cpus = 4, utilization_ratio=0.8):
+        # there are 32 total available cpus
+        available = ray.available_resources().get("CPU", 32)  
+        usable = int(available * utilization_ratio)
+        return max(1, usable // task_cpus)
 
     def process(self,):
         # load the raw data --- non-packaged directory to avoid large size package to Ray
@@ -306,12 +353,13 @@ class LabeledSubGraphs(Dataset):
 
         # split into batches
         num_batches = len(subgraphs_df) // self.batch_size + 1
-        subgraph_batches = (subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches))
+        subgraph_batches = [subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches)]
 
         # Set OOM mitigation variables before initializing Ray
         os.environ["RAY_memory_usage_threshold"] = "0.9"  # Adjust based on node capacity
         os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
 
+        ray.shutdown()
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                               "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
@@ -320,39 +368,38 @@ class LabeledSubGraphs(Dataset):
             # create a single encoder actor
             encoder_actor = EncoderActor.remote()
 
-            # check available resources
-            available_resources = ray.available_resources()
-            # use 80% of the cpus   
-            max_parallel = int(available_resources.get("CPU", 4) * 0.8)
-
-            @ray.remote(num_cpus=2)  # Adjust based on workload
+            max_parallel = self.get_max_parallel_tasks()
+            @ray.remote(num_cpus=4)  # Adjust based on workload
             def process_subgraphs_wrapper(batch, max_nodes_per_type, max_edges_per_type, actor):
                 return process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, actor)
-
-            # process in rounds using ray.wait()
+            
             tasks = []
             results = []
 
             for batch in subgraph_batches:
+                # Always submit the task
+                obj_ref = process_subgraphs_wrapper.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
+                tasks.append(obj_ref)
+                # If tasks reach max parallelism, wait for one to finish
                 if len(tasks) >= max_parallel:
-                    # wait for at least one task to complete before submitting a new one
-                    done, tasks = ray.wait(tasks, num_returns = 1)
-                    results.append(ray.get(done[0]))
-                
-                # submit a new task
-                tasks.append(process_subgraphs_wrapper.remote(batch, max_nodes_per_type, \
-                                                              max_edges_per_type, encoder_actor))
+                    done, tasks = ray.wait(tasks, num_returns=1)
+                    first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
+                    final_result = ray.get(first_obj_ref)
+                    results.append(final_result)
+            # Process remaining tasks
+            while tasks:
+                done, tasks = ray.wait(tasks, num_returns=1)
+                first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
+                final_result = ray.get(first_obj_ref)
+                results.append(final_result)
 
-            # collect remaining results
-            for task in tasks:
-                results.append(ray.get(task))
+        except Exception as e:
+            print('[-] Error occurs when process subgraphs',e)
 
         finally:
-            # free memory after execution
             del subgraph_batches
             ray.shutdown()
 
-        # save the processed batches
         for i, batch in enumerate(results):
             # make sure there are no objectRefs in batch
             for node_type in batch.node_types:
@@ -388,7 +435,10 @@ if __name__ == "__main__":
     batch_idx = 0
     if batch_idx < len(dataset):
         batch_data = dataset.get(batch_idx)
-        print(f"loaded batch {batch_idx} with {len(ray.get(batch_data))} subgraphs")
+        if isinstance(batch_data, ray.ObjectRef):
+            print(f"loaded batch {batch_idx} with {len(ray.get(batch_data))} subgraphs")
+        else:
+            print(f"loaded batch {batch_idx} with {len(batch_data)} subgraphs")
     else:
         print("Batch index out of range")
 
