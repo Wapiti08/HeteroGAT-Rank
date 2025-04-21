@@ -81,8 +81,10 @@ if __name__ == "__main__":
         dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=4,  # Reduce to test performance; 20 may be overkill for file I/O
-        persistent_workers=True,
+        # num_workers=4,  # Reduce to test performance; 20 may be overkill for file I/O
+        # persistent_workers=True,
+        pin_memory=False,
+        prefetch_factor=None,
         prefetch_factor=2
     )
 
