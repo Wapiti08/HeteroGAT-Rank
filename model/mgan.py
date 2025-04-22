@@ -242,7 +242,8 @@ class HeteroGAT(torch.nn.Module):
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
         '''
-
+        print(batch)
+        print(batch.batch)
         x_dict, edge_index_dict = batch.x_dict, batch.edge_index_dict
 
         x_dict = self.conv1(x_dict, edge_index_dict)

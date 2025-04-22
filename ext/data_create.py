@@ -33,6 +33,7 @@ import pickle
 import numpy as np
 from torch_geometric.transforms import Pad
 from tqdm import tqdm
+import psutil
 
 # # Ray is properly initialized before any remote functions are called
 if ray.is_initialized():
@@ -162,6 +163,53 @@ def apply_padding(hetero_data, all_node_types, feature_dim, max_nodes_per_type, 
             hetero_data[node_type].num_nodes = max_nodes_per_type[node_type]
     return pad_transform(hetero_data)
 
+def load_in_chunks(file_path, chunk_size):
+    with open(file_path, 'rb') as fr:
+        data = pickle.load(fr)
+        for i in range(0, len(data), chunk_size):
+            yield data[i:i+chunk_size]
+
+
+
+def pad_size(subgraphs):
+    """Compute max nodes and edges per type in a batch of subgraphs."""
+    max_nodes_per_type = {}
+    max_edges_per_type = {}
+
+    # First pass to determine max nodes and edges per type
+    for subgraph in subgraphs:
+        node_df = pd.DataFrame(subgraph['nodes'])
+        edge_df = pd.DataFrame(subgraph['edges'])
+
+        if "type" in node_df.columns:
+            for node_type, type_nodes in node_df.groupby('type'):
+                # Update max nodes per type
+                max_nodes_per_type[node_type] = max(max_nodes_per_type.get(node_type, 0), len(type_nodes))
+
+        if "type" in edge_df.columns:
+            # Update max edges per type
+            for edge_type, type_edges in edge_df.groupby('type'):
+                for src, tgt in zip(type_edges['source'], type_edges['target']):
+                    edge_tuple = (type_edges['source'].iloc[0], edge_type, type_edges['target'].iloc[0])
+                    max_edges_per_type[edge_tuple] = max(max_edges_per_type.get(edge_tuple, 0), len(type_edges))
+
+    return max_nodes_per_type, max_edges_per_type
+
+def compute_global_pad_size(file_path, chunk_size):
+    global_max_nodes = {}
+    global_max_edges = {}
+
+    for chunk in load_in_chunks(file_path, chunk_size):
+        local_nodes, local_edges = pad_size(chunk)
+
+        for k, v in local_nodes.items():
+            global_max_nodes[k] = max(global_max_nodes.get(k, 0), v)
+
+        for k, v in local_edges.items():
+            global_max_edges[k] = max(global_max_edges.get(k, 0), v)
+
+    return global_max_nodes, global_max_edges
+
 
 @ray.remote
 class EncoderActor:
@@ -283,11 +331,16 @@ class LabeledSubGraphs(Dataset):
         :param pre_transform: a function applied before saving to disk
         :param pre_filter: a function to filter data objects
         '''
-        self.batch_size = batch_size
+        self.batch_size = self.get_adaptive_batch_size(batch_size)
         self.data_path = root
-
         super().__init__(root, transform, pre_transform, pre_filter)
 
+    @staticmethod
+    def get_adaptive_batch_size(default_bs):
+        total_mem = psutil.virtual_memory().total/(1024 * 3)
+        if total_mem < 16:
+            return max(1, default_bs/2)
+        return default_bs
 
     @property
     def raw_file_names(self):
@@ -307,30 +360,6 @@ class LabeledSubGraphs(Dataset):
         '''
         pass
 
-    def pad_size(self, subgraphs):
-        # initialize dictionaries to track maximum counts
-        max_nodes_per_type = {}
-        max_edges_per_type = {}
-
-        # First pass to determine max nodes and edges per type
-        for subgraph in subgraphs:
-            node_df = pd.DataFrame(subgraph['nodes'])
-            edge_df = pd.DataFrame(subgraph['edges'])
-
-            if "type" in node_df.columns:
-                for node_type, type_nodes in node_df.groupby('type'):
-                    # Update max nodes per type
-                    max_nodes_per_type[node_type] = max(max_nodes_per_type.get(node_type, 0), len(type_nodes))
-
-            if "type" in edge_df.columns:
-                # Update max edges per type
-                for edge_type, type_edges in edge_df.groupby('type'):
-                    for src, tgt in zip(type_edges['source'], type_edges['target']):
-                        edge_tuple = (type_edges['source'].iloc[0], edge_type, type_edges['target'].iloc[0])
-                        max_edges_per_type[edge_tuple] = max(max_edges_per_type.get(edge_tuple, 0), len(type_edges))
-
-        return max_nodes_per_type, max_edges_per_type
-
     @staticmethod
     def get_max_parallel_tasks(task_cpus = 4, utilization_ratio=0.8):
         # there are 32 total available cpus
@@ -343,62 +372,50 @@ class LabeledSubGraphs(Dataset):
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
                              "subgraphs.pkl")
         
-        with open(raw_path, 'rb') as fr:
-            subgraphs = pickle.load(fr)
+        max_nodes_per_type, max_edges_per_type = compute_global_pad_size(raw_path, self.batch_size)
 
-        max_nodes_per_type, max_edges_per_type = self.pad_size(subgraphs)
-
-        # convert to pandas framework for easier processing
-        subgraphs_df = pd.DataFrame(subgraphs)
-
-        # split into batches
-        num_batches = len(subgraphs_df) // self.batch_size + 1
-        subgraph_batches = [subgraphs[i * self.batch_size: (i+1) * self.batch_size] for i in range(num_batches)]
-
+        ray.shutdown()
         # Set OOM mitigation variables before initializing Ray
         os.environ["RAY_memory_usage_threshold"] = "0.9"  # Adjust based on node capacity
         os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
-
-        ray.shutdown()
         # process batches in parallel
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                               "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
 
-        try:
-            # create a single encoder actor
-            encoder_actor = EncoderActor.remote()
+        # create a single encoder actor
+        encoder_actor = EncoderActor.remote()
 
-            max_parallel = self.get_max_parallel_tasks()
-            @ray.remote(num_cpus=4)  # Adjust based on workload
-            def process_subgraphs_wrapper(batch, max_nodes_per_type, max_edges_per_type, actor):
-                return process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, actor)
-            
-            tasks = []
-            results = []
+        max_parallel = self.get_max_parallel_tasks()
 
-            for batch in subgraph_batches:
-                # Always submit the task
-                obj_ref = process_subgraphs_wrapper.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
-                tasks.append(obj_ref)
-                # If tasks reach max parallelism, wait for one to finish
-                if len(tasks) >= max_parallel:
-                    done, tasks = ray.wait(tasks, num_returns=1)
-                    first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
-                    final_result = ray.get(first_obj_ref)
-                    results.append(final_result)
-            # Process remaining tasks
-            while tasks:
+        @ray.remote(num_cpus=4)  # Adjust based on workload
+        def process_subgraphs_wrapper(batch, max_nodes_per_type, max_edges_per_type, actor):
+            return process_subgraphs.remote(batch, max_nodes_per_type, max_edges_per_type, actor)
+        
+        tasks = []
+        results = []
+        chunk_id = 0
+
+        for batch in load_in_chunks(raw_path, self.batch_size):
+            # Always submit the task
+            obj_ref = process_subgraphs_wrapper.remote(batch, max_nodes_per_type, max_edges_per_type, encoder_actor)
+            tasks.append(obj_ref)
+            # If tasks reach max parallelism, wait for one to finish
+            if len(tasks) >= max_parallel:
                 done, tasks = ray.wait(tasks, num_returns=1)
                 first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
                 final_result = ray.get(first_obj_ref)
-                results.append(final_result)
+                results.append(chunk_id, final_result)
+                chunk_id += 1
 
-        except Exception as e:
-            print('[-] Error occurs when process subgraphs',e)
+        # Process remaining tasks
+        while tasks:
+            done, tasks = ray.wait(tasks, num_returns=1)
+            first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
+            final_result = ray.get(first_obj_ref)
+            results.append(chunk_id, final_result)
+            chunk_id += 1 
 
-        finally:
-            del subgraph_batches
-            ray.shutdown()
+        ray.shutdown()
 
         for i, batch in enumerate(results):
             # make sure there are no objectRefs in batch

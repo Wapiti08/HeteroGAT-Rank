@@ -84,8 +84,7 @@ if __name__ == "__main__":
         # num_workers=4,  # Reduce to test performance; 20 may be overkill for file I/O
         # persistent_workers=True,
         pin_memory=False,
-        prefetch_factor=None,
-        prefetch_factor=2
+        prefetch_factor=None
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
