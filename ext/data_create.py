@@ -404,7 +404,7 @@ class LabeledSubGraphs(Dataset):
                 done, tasks = ray.wait(tasks, num_returns=1)
                 first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
                 final_result = ray.get(first_obj_ref)
-                results.append(chunk_id, final_result)
+                results.append((chunk_id, final_result))
                 chunk_id += 1
 
         # Process remaining tasks
@@ -412,12 +412,12 @@ class LabeledSubGraphs(Dataset):
             done, tasks = ray.wait(tasks, num_returns=1)
             first_obj_ref = ray.get(done[0])     # This gives an ObjectRef returned by wrapper
             final_result = ray.get(first_obj_ref)
-            results.append(chunk_id, final_result)
+            results.append((chunk_id, final_result))
             chunk_id += 1 
 
         ray.shutdown()
 
-        for i, batch in enumerate(results):
+        for i, batch in results:
             # make sure there are no objectRefs in batch
             for node_type in batch.node_types:
                 assert isinstance(batch[node_type].x, torch.Tensor), f"{node_type} has ObjectRef!"
