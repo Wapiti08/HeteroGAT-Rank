@@ -12,7 +12,6 @@ from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv
 from model import DiffPool
 from torch import nn
 import torch.nn.functional as F
-from ext.data_create import LabeledSubGraphs
 from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
 from datetime import datetime

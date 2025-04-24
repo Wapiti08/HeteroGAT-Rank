@@ -34,29 +34,43 @@ import numpy as np
 from torch_geometric.transforms import Pad
 from tqdm import tqdm
 import psutil
+from utils import prostring
+from ext import fea_encoder
 
 # # Ray is properly initialized before any remote functions are called
 if ray.is_initialized():
     ray.shutdown()
 
+
 def generate_node_id(row):
     '''
-    generate a unique ID for each node based on its attributes
+    Generate a unique ID for each node based on its value attribute.
     '''
-    '''
-    Generate a unique ID for each node based on its attributes
-    '''
-    # Ensure all values are strings and non-empty
-    type_val = str(row.get('type', '')).strip()
+    # Ensure the value is a string and non-empty
     value_val = str(row.get('value', '')).strip()
-    eco_val = str(row.get('eco', '')).strip()
 
-    # If all attributes are empty, raise a warning or use a fallback ID
-    if not type_val and not value_val and not eco_val:
-        raise ValueError(f"Invalid node attributes: {row}")
+    # If the value is empty, raise a warning or use a fallback ID
+    if not value_val:
+        raise ValueError(f"Invalid node value: {row}")
 
-    unique_str = f"{type_val}_{value_val}_{eco_val}"
-    return hash(unique_str)
+def encode_node_attrs(nodes, node_features, encoder_actor, encoder_type):
+    ''' encode node attrs like type and eco as one-hot features
+    
+    '''
+    # one-hot encoding for type and eco
+    type_map = {type_val: idx for idx, type_val in enumerate(nodes['type'].unique())}
+    eco_map = {eco_val: idx for idx, eco_val in enumerate(nodes['eco'].unique())}
+
+    # Convert 'type' and 'eco' into one-hot vectors
+    type_tensor = torch.tensor([type_map[t] for t in nodes['type']], dtype=torch.float)
+    eco_tensor = torch.tensor([eco_map[e] for e in nodes['eco']], dtype=torch.float)
+
+    # Convert the numpy array to a PyTorch tensor
+    value_embeddings = ray.get(encoder_actor.encode_value.remote(nodes['value'].values, encoder_type))
+    
+    # Concatenate the features with node-specific features
+    node_attributes = torch.cat([node_features_tensor, type_tensor, eco_tensor], dim=1)
+    return node_attributes
 
 
 def prepare_encode_jobs(subgraph_batch):
@@ -83,17 +97,25 @@ def prepare_encode_jobs(subgraph_batch):
     for i, subgraph in enumerate(subgraph_batch):
         # convert list of node dicts into a DataFrame, drop row with all NaNs
         nodes = pd.DataFrame(subgraph['nodes']).dropna()
-        nodes['id'] = nodes.apply(generate_node_id, axis=1)
-        nodes.set_index('id', inplace=True)
+
+        # Use 'value' directly as the node ID
+        nodes['id'] = nodes['value']
+        nodes.set_index('id', inplace=True)  # Set 'value' as index (node ID)
         node_dataframes[i] = nodes
 
         # group by node type to handle different encoding strategies
         for node_type, group in nodes.groupby('type'):
             df = pd.DataFrame(group['value'].fillna(""), columns=['value'])
             job_type = 'iden' if node_type == 'Port' else 'seq'
+
             if job_type == 'iden':
-                df['value'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
-            encode_jobs.append((df, job_type))
+                df['value'] = pd.to_numeric(df['value'], errors='coerce')
+                df['value'] = df['value'].fillna(0)
+            
+            # Encode node attributes (type and eco) and include them in the job
+            encoded_node_features = encode_node_attrs(group, df.values)
+            encode_jobs.append((encoded_node_features, job_type))
+
             # Track the mapping of nodes for later reconstruction or alignment
             node_type_map.append((i, node_type, len(group)))
 
@@ -107,6 +129,17 @@ def decode_encoded_features(encoded_batches, node_type_map):
         features.setdefault(graph_id, {})[node_type] = encoded_batches[enc_idx]
         enc_idx += 1
     return features
+
+# def get_node_index(node_id, nodes):
+#     """Return the index of the node in the nodes DataFrame."""
+#     try:
+#         # Ensure node_id is a string if needed
+#         node_id = str(node_id)
+#         return nodes.index.get_loc(node_id)  # Get the index of the node in the nodes DataFrame
+#     except KeyError:
+#         # If node ID is not found, handle it gracefully
+#         print(f"Node ID {node_id} not found in nodes.index.")
+#         return -1  # Return a default value (could be -1 or handle as necessary)
 
 def construct_hetero_data(subgraph, nodes, edges, node_features, feature_dim):
     ''' construct a torch_geometric.data.HeteroData object from a subgraph
@@ -130,26 +163,40 @@ def construct_hetero_data(subgraph, nodes, edges, node_features, feature_dim):
         hetero_data[node_type].x = feats
         hetero_data[node_type].num_nodes = feats.size(0)
     
+    # map nodes by 'value' as node_id
+    node_id_index = nodes.set_index('value').index
     # filter out edges with missing nodes
-    valid_edges = edges['source'].isin(nodes.index) & edges['target'].isin(nodes.index)
+    valid_edges = edges['source'].apply(lambda x: x in node_id_index) & \
+                        edges['target'].apply(lambda x: x in node_id_index)
     edges = edges[valid_edges]
+
+    # Apply encoding to node attributes like "type" and 'eco'
+    encoded_node_features = encode_node_attrs(nodes, node_features)
+
+    # add node attributes like "type" and 'eco' to HeteroData
+    for node_value, row in nodes.iterrows():
+        node_id = row['value']
+        hetero_data[node_id].type = row['type']  # Store 'type' as node attribute
+        hetero_data[node_id].eco = row['eco']    # Store 'eco' as node attribute
+        hetero_data[node_id].x = encoded_node_features
 
     # group edges by edge type
     for edge_type, type_edges in edges.groupby('type'):
         # map original source/target node IDs to their positions in the node index
-        src_ids = type_edges['source'].apply(lambda x: nodes.index.get_loc(x)).to_numpy(dtype=np.int32)
-        tgt_ids = type_edges['target'].apply(lambda x: nodes.index.get_loc(x)).to_numpy(dtype=np.int32)
+        src_ids = type_edges['source'].apply(lambda x: node_id_index.get_loc(x)).to_numpy(dtype=np.int32)
+        tgt_ids = type_edges['target'].apply(lambda x: node_id_index.get_loc(x)).to_numpy(dtype=np.int32)
 
         # create pytorch edge index tensor: shape [2, num_edges]
         edge_index = torch.tensor([src_ids, tgt_ids], dtype=torch.long)
-
-        # initialize edge attributes as zero vector
         edge_attr = torch.zeros((len(type_edges), feature_dim), dtype=torch.half)
 
         # store edge info under the corresponding edge type
         hetero_data[edge_type].edge_index = edge_index
         hetero_data[edge_type].edge_attr = edge_attr
-    
+
+        print('generated edge_index is:', edge_index)
+        print('generated edge_attr is:', edge_attr)
+
     # add graph-level label
     hetero_data['label'] = torch.tensor(subgraph['label'], dtype=torch.long)
 
@@ -165,10 +212,9 @@ def apply_padding(hetero_data, all_node_types, feature_dim, max_nodes_per_type, 
 
 def load_in_chunks(file_path, chunk_size):
     with open(file_path, 'rb') as fr:
-        data = pickle.load(fr)
+        data = pickle.load(fr)[:50]
         for i in range(0, len(data), chunk_size):
             yield data[i:i+chunk_size]
-
 
 
 def pad_size(subgraphs):
@@ -215,27 +261,20 @@ def compute_global_pad_size(file_path, chunk_size):
 class EncoderActor:
     def __init__(self,):
         # Import here to avoid issues with Ray serialization
-        from ext import fea_encoder
         self.seq_encoder = fea_encoder.SequenceEncoder()
         self.iden_encoder = fea_encoder.IdentityEncoder(dtype=torch.float, \
                                                         output_dim=self.seq_encoder.embedding_dim)
         self._is_shutdown = False
 
-    def encode_batch(self, df_list):
+    def encode_batch(self,  values, encoder_type):
         try:
-            print("=== Entered encode_batch ===")
-            results = []
-            for idx, (df, encoder_type) in enumerate(df_list):
-                print(f"  [Job {idx}] Type: {encoder_type}, Shape: {df.shape}")
-                if encoder_type == "seq":
-                    encoded = self.seq_encoder(df)
-                else:
-                    encoded = self.iden_encoder(df)
-                print(f"  [Job {idx}] Encoded shape: {encoded.shape}")
-                results.append(encoded)
-            return results
+            if encoder_type == "seq":
+                encoded = self.seq_encoder(values)
+            else:
+                encoded = self.iden_encoder(values)
+            return encoded
         except Exception as e:
-            print("!!! Exception inside encode_batch:", e)
+            print("!!! Exception inside encode_value:", e)
             import traceback
             traceback.print_exc()
             return []
@@ -281,10 +320,19 @@ def process_subgraphs(subgraph_batch: list, max_nodes_per_type: dict, max_edges_
     node_features_dict = decode_encoded_features(encoded_batches, node_type_map)
 
     for i, subgraph in enumerate(subgraph_batch):
+        # process nodes
         nodes = pd.DataFrame(subgraph['nodes']).dropna()
         nodes['id'] = nodes.apply(generate_node_id, axis=1)
         nodes.set_index('id', inplace=True)
+        # Apply string processing to the 'value' column in nodes
+        if 'value' in nodes.columns:
+            nodes['value'] = nodes['value'].apply(lambda x: prostring.process_string(x) if isinstance(x, str) else x)
+        
+        # process edges
         edges = pd.DataFrame(subgraph['edges']).dropna(subset=['source', 'target'])
+        # Apply string processing to the 'source' and 'target' columns in edges
+        edges['source'] = edges['source'].apply(lambda x: prostring.process_string(x) if isinstance(x, str) else x)
+        edges['target'] = edges['target'].apply(lambda x: prostring.process_string(x) if isinstance(x, str) else x)
 
         # Use ID of nodes DataFrame to fetch corresponding encoded features
         node_features = node_features_dict.get(i, {})
@@ -344,7 +392,7 @@ class LabeledSubGraphs(Dataset):
 
     @property
     def raw_file_names(self):
-        return ['subgraphs.pkl']
+        return ['test_top_100_subgraphs.pkl']
     
     @property
     def processed_file_names(self):
@@ -370,7 +418,7 @@ class LabeledSubGraphs(Dataset):
     def process(self,):
         # load the raw data --- non-packaged directory to avoid large size package to Ray
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
-                             "subgraphs.pkl")
+                             "test_top_100_subgraphs.pkl")
         
         max_nodes_per_type, max_edges_per_type = compute_global_pad_size(raw_path, self.batch_size)
 
@@ -440,7 +488,7 @@ class LabeledSubGraphs(Dataset):
 
 if __name__ == "__main__":
     # load pickle format of graph dataset with graph representations
-    data_path = Path.cwd().joinpath("output")
+    data_path = Path.cwd().joinpath("test-small")
 
     # create an instance of the dataset
     dataset = LabeledSubGraphs(root=data_path, batch_size=10)
