@@ -118,9 +118,7 @@ class LabeledSubGraphs(Dataset):
         # initialize ray
         ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                         "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
-        # process batches in parallel
-        max_parallel = self.get_max_parallel_tasks()
-
+        
         tasks = []
         chunk_id = 0
         # Global ID mapping
@@ -131,6 +129,7 @@ class LabeledSubGraphs(Dataset):
             for subgraph in batch:
                 task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
                 tasks.append(task)
+                chunk_id += 1
         
         # collect the results
         results = ray.get(tasks)
@@ -145,8 +144,13 @@ class LabeledSubGraphs(Dataset):
                     global_node_counter += 1
 
             # Save the processed data
-            for i, data in enumerate(processed_data):
-                torch.save(data, osp.join(self.processed_dir, f'batch_{i}.pt'))
+            # If processed_data is HeteroData, handle it accordingly
+            if isinstance(processed_data, HeteroData):
+                # Save the entire HeteroData object as a .pt file
+                torch.save(processed_data, osp.join(self.processed_dir, f'batch_{chunk_id}.pt'))
+            else:
+                for i, data in enumerate(processed_data):
+                    torch.save(data, osp.join(self.processed_dir, f'batch_{i}.pt'))
 
         # Shutdown Ray after processing
         ray.shutdown()
