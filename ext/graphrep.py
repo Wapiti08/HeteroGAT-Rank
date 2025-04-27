@@ -13,7 +13,7 @@
     "source": x,
     "target": y,
     "value": str,
-    "type": Action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
+    "type": Action (Path)| DNS(Hostname) | CMD (Command) | Socket (IP, Port, Hostnames)
 
  }
  

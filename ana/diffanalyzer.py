@@ -15,20 +15,41 @@ sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 from model import mgan
 from sklearn.preprocessing import MinMaxScaler
+from collections import defaultdict
 
 
 class EcosystemFeatureAnalysis:
 
-    def __init__(self, model:mgan.MaskedHeteroGAT, eco_dict:dict, threshold:float):
+    def __init__(self, model:mgan.MaskedHeteroGAT, eco_encoder, threshold:float):
         '''
         args:
             model: trained maskedheteroGAT model
-            eco_dict: dict mappping package_name nodes to their ecosystems {node_id: ecosystem_label}
+            eco_encoder: Encoder used to decode `eco` information from node features (e.g., one-hot encoding or embedding)
+            threshold: threshold value for filtering critical edges/nodes
+
         '''
         self.model = model
-        self.eco_dict = eco_dict
+        self.eco_encoder = eco_encoder
         self.threshold = threshold
         self.scaler = MinMaxScaler()
+
+    def group_nodes_by_eco(self, x_dict, node_types):
+        ''' group nodes by their 'eco' attribute extracted from model features
+        
+        '''
+        eco_groups = defaultdict(list)
+
+        for node_type in node_types:
+            for node_type in x_dict:
+                for indx, node_feature in enumerate(x_dict[node_type]):
+                    eco_emb = node_feature[-self.eco_encoder.n_features_]
+                    eco = self.eco_encoder.inverse_transform(eco_emb.view(-1,1))
+
+                    if eco is not None:
+                        eco_groups[eco].append(node_feature)
+        
+        return eco_groups
+
 
     def extract_subgraphs(self, edge_index_dict, node_type):
         ''' extract intra- and inter-ecosystem subgraphs
@@ -128,7 +149,6 @@ class EcosystemFeatureAnalysis:
         top_nodes = sorted(node_att.items(), key=lambda x: x[1], reverse=True)[:10]
         return top_intra_edges, top_inter_edges, top_nodes
     
-
 
 if __name__ == "__main__":
     

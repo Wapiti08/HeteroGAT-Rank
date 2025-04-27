@@ -37,7 +37,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         self.conv1 = HeteroConv(
             {
                 ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'DNS', 'DNS Host'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
                 ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
@@ -50,7 +50,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         self.conv2 = HeteroConv(
             {
                 ('Package_Name', 'Action', 'Path'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'DNS', 'Hostname'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'DNS', 'DNS Host'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
@@ -77,11 +77,12 @@ class MaskedHeteroGAT(torch.nn.Module):
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
 
         '''
-        # apply edge masks
+        # apply edge masks (stochastic masking)
         masked_edge_index_dict = {
             # stochastic masking
             key: edge_index[:, torch.bernoulli(self.edge_mask).bool()]
             for key, edge_index in edge_index_dict.items()
+            if key in edge_index_dict  # Ensure only existing edge types are used
         }
 
         # apply node masks
@@ -208,7 +209,7 @@ class HeteroGAT(torch.nn.Module):
         self.conv1 = HeteroConv(
             {
                 ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
+                ('Package_Name', 'DNS', 'DNS Host'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
                 ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
@@ -221,7 +222,7 @@ class HeteroGAT(torch.nn.Module):
         self.conv2 = HeteroConv(
             {
                 ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'DNS', 'Hostname'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
+                ('Package_Name', 'DNS', 'DNS Host'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
                 ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
                 ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
                 ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
@@ -241,8 +242,6 @@ class HeteroGAT(torch.nn.Module):
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
         '''
-        print(batch)
-        print(batch.batch)
         x_dict, edge_index_dict = batch.x_dict, batch.edge_index_dict
 
         x_dict = self.conv1(x_dict, edge_index_dict)
