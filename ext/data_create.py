@@ -121,11 +121,6 @@ class LabeledSubGraphs(Dataset):
         # process batches in parallel
         max_parallel = self.get_max_parallel_tasks()
 
-        @ray.remote(num_cpus=3)  # Adjust based on workload
-        def process_subgraphs_wrapper(subgraph, global_node_id_map, global_node_counter):
-            processed_data, local_node_map, local_counter = process_subgraphs(subgraph, global_node_id_map, global_node_counter)
-            return processed_data, local_node_map, local_counter  
-            
         tasks = []
         chunk_id = 0
         # Global ID mapping
@@ -134,9 +129,8 @@ class LabeledSubGraphs(Dataset):
 
         for batch in load_in_chunks(raw_path, self.batch_size):
             for subgraph in batch:
-                task = process_subgraphs_wrapper.remote(subgraph, global_node_id_map, global_node_counter)
+                task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
                 tasks.append(task)
-                chunk_id += 1
         
         # collect the results
         results = ray.get(tasks)
