@@ -35,7 +35,9 @@ seq_encoder = fea_encoder.SeqEncoder(device=device)
 iden_encoder = fea_encoder.IdenEncoder(dtype=torch.float, \
                                                 output_dim=seq_encoder.embedding_dim)
 
-cate_encoder = fea_encoder.CateEncoder()
+# default embedding_size for category-like value
+embedding_dim = 16
+cate_encoder = fea_encoder.CateEncoder(embedding_dim)
 
 
 def get_or_add_node(node, global_node_id_map, global_node_counter):
@@ -50,6 +52,7 @@ def get_or_add_node(node, global_node_id_map, global_node_counter):
         global_node_counter += 1
     
     return node_idx, global_node_id_map, global_node_counter
+
 
 def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
@@ -86,13 +89,18 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
         # concatenate encoded node value with encode eco value 
         combined_features = torch.cat((node_features, eco_feature), dim=1)
 
-        # add node features for respective type
         if node_type not in data:
-            data[node_type].x = combined_features
-        else:
+            data[node_type] = HeteroData()  # Ensure that the node type is initialized
+
+        # add node features for respective type and set num_nodes for each node type explicitly
+
+        if hasattr(data[node_type], 'x') and data[node_type].x is not None:
             data[node_type].x = torch.cat((data[node_type].x, combined_features), dim=0)
+        else:
+            data[node_type].x = combined_features
 
         node_indices.append(global_node_id)
+
 
     # process edges (aligning edge indices with global node IDs)
     edge_indices = []

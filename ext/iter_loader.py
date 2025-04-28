@@ -3,20 +3,15 @@ from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import os
 import torch
-from torch.utils.data import IterableDataset, get_worker_info
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 from torch_geometric.loader import DataLoader
 import numpy as np
 import time
+from torch_geometric.data import HeteroData
+from torch_geometric.data import Batch
 
-try:
-    import ray
-    ray.init(ignore_reinit_error=True, include_dashboard=False)
-    use_ray = True
-    ray_ObjectRef = ray.ObjectRef  # Save for isinstance checks
-except ImportError:
-    print("Ray not installed, continuing without Ray.")
-    use_ray = False
-    ray_ObjectRef = type(None)  # Dummy fallback type
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class IterSubGraphs(IterableDataset):
     
@@ -45,23 +40,33 @@ class IterSubGraphs(IterableDataset):
             print(f"[Iter] Loading {file_path.name}")
             try:
                 batch = torch.load(file_path, map_location="cpu")
+
+                if batch is None:
+                    print(f"[Iter] Batch in {file_path.name} is None.")
+                    continue
                 print(f"[Iter] Loaded {file_path.name}")
+                print(f"[Iter] Loaded {file_path.name}")
+
             except Exception as e:
                 print(f"[Iter] Failed to load {file_path.name}: {e}")
                 continue
-
-            if use_ray and isinstance(batch, ray.ObjectRef):
-                batch = ray.get(batch)
-                print(f"[Worker {worker_info.id if worker_info else 0}] Retrieved from ray.ObjectRef")
 
             # Optional: check type and size
             print(f"[Iter] batch type: {type(batch)}")
             print(f"[Iter] batch keys: {batch.keys() if hasattr(batch, 'keys') else 'N/A'}")
 
+            # calculate and set num_nodes
+            for node_type in batch.keys():  # Now iterating over node types like 'Package_Name', 'Path', etc.
+                # Skip edge-related keys like 'edge_index' and 'edge_attr'
+                if node_type in ['edge_index', 'edge_attr']:
+                    continue
+                if hasattr(batch[node_type], 'x'):
+                    node_data = batch[node_type].x 
+                    batch[node_type].num_nodes = node_data.size(0)  # Assuming node_data has the shape [num_nodes, features]
+            
             if self.transform:
                 batch = self.transform(batch)
                 print("[Iter] Transform applied")
-
             yield batch
             print("[Iter] Yielded one batch")
 
@@ -69,9 +74,12 @@ class IterSubGraphs(IterableDataset):
         return len(self.file_list)
 
 
+# Custom collate function to handle HeteroData objects
+def collate_hetero_data(batch):
+    """Custom collate function to handle batching of HeteroData objects."""
+    return Batch.from_data_list(batch)
+
 if __name__ == "__main__":
-    import argparse
-    from pathlib import Path
 
     data_path = Path.cwd().joinpath("test-small", "processed")
     
@@ -79,32 +87,36 @@ if __name__ == "__main__":
 
     dataloader = DataLoader(
         dataset,
-        batch_size=1,
+        batch_size=1,  # Start with batch size of 1 for testing
         shuffle=False,
-        # num_workers=4,  # Reduce to test performance; 20 may be overkill for file I/O
-        # persistent_workers=True,
+        num_workers=0,  # Set to 0 to avoid any worker-related issues
         pin_memory=False,
-        prefetch_factor=None
+        prefetch_factor=None,
+        collate_fn=None 
     )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print("[Main] Starting dataloader iteration...")
 
     try:
         for idx, batch in enumerate(dataloader):
             print(f"[Main] --- BATCH {idx} RECEIVED ---")
-            
-            if isinstance(batch, list) or isinstance(batch, tuple):
-                print(f"[Main] batch is a {type(batch)} of len={len(batch)}")
-                print(f"[Main] batch[0] type: {type(batch[0])}")
-                print(f"[Main] batch[0] keys: {batch[0].keys() if hasattr(batch[0], 'keys') else 'N/A'}")
-            else:
-                print(f"[Main] batch type: {type(batch)}")
-                print(f"[Main] batch keys: {batch.keys() if hasattr(batch, 'keys') else 'N/A'}")
+            # Check if batch is None
+            if batch is None:
+                print(f"[Main] Batch is None, skipping.")
+                continue
 
-            time.sleep(0.5)  # simulate some processing time
-            break
+            # Check if the saved file exists
+            batch_filename = f"batch_{idx}.pt"
+            saved_filepath = data_path.joinpath(batch_filename)
+            if saved_filepath.exists():
+                print(f"[Main] File {saved_filepath} saved successfully.")
+            else:
+                print(f"[Main] File {saved_filepath} not found.")
+
+            time.sleep(0.5)  # Simulate processing time
+
+            # Optionally, remove break to continue iterating
+            break  # Only process the first batch for testing, remove this line to process all
 
     except Exception as e:
         print(f"[ERROR] DataLoader iteration failed: {e}")

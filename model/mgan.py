@@ -277,7 +277,7 @@ if __name__ == "__main__":
 
     data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
     print("Creating iterative dataset")
-    dataset = IterSubGraphs(root=data_path, batch_size = 1)
+    dataset = IterSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
     print("Creating subgraph dataloader")
     dataloader = DataLoader(
@@ -292,7 +292,6 @@ if __name__ == "__main__":
     
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
     batch=next(iter(dataloader))
-    
 
     model2 = HeteroGAT(
         hidden_channels=64,

@@ -31,21 +31,14 @@ import pandas as pd
 from pathlib import Path
 import pickle
 import numpy as np
-from torch_geometric.transforms import Pad
-from tqdm import tqdm
 import psutil
-from utils import prostring
-from ext import fea_encoder
 from ext import hetergraph
-
-
 
 def load_in_chunks(file_path, chunk_size):
     with open(file_path, 'rb') as fr:
-        data = pickle.load(fr)[:50]
+        data = pickle.load(fr)
         for i in range(0, len(data), chunk_size):
             yield data[i:i+chunk_size]
-
 
 @ray.remote
 def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
@@ -56,7 +49,14 @@ def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
     return:
         torch_geometric.data.Batch: A batch of padded heterogeneous graph data objects.
     '''
-    return hetergraph.hetero_graph_build(subgraph, global_node_id_map, global_node_counter)
+    # Check if the data is valid
+    data, global_node_id_map, global_node_counter = hetergraph.hetero_graph_build(subgraph, global_node_id_map, global_node_counter)
+
+    if data is None:
+        print(f"Error: Processed data is None for subgraph {subgraph}")
+        return None, global_node_id_map, global_node_counter
+
+    return data, global_node_id_map, global_node_counter
 
 class LabeledSubGraphs(Dataset):
     
@@ -81,7 +81,7 @@ class LabeledSubGraphs(Dataset):
 
     @property
     def raw_file_names(self):
-        return ['test_top_100_subgraphs.pkl']
+        return ['subgraphs.pkl']
     
     @property
     def processed_file_names(self):
@@ -107,51 +107,51 @@ class LabeledSubGraphs(Dataset):
     def process(self,):
         # load the raw data --- non-packaged directory to avoid large size package to Ray
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
-                             "test_top_100_subgraphs.pkl")
+                             "subgraphs.pkl")
         
-
         ray.shutdown()
         # Set OOM mitigation variables before initializing Ray
         os.environ["RAY_memory_usage_threshold"] = "0.9"  # Adjust based on node capacity
         os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
 
         # initialize ray
-        ray.init(runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
+        ray.init(ignore_reinit_error=True, runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                         "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
         
-        tasks = []
         chunk_id = 0
         # Global ID mapping
         global_node_id_map = {}
         global_node_counter = 0
 
         for batch in load_in_chunks(raw_path, self.batch_size):
+            batch_tasks = []
             for subgraph in batch:
                 task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
-                tasks.append(task)
-                chunk_id += 1
-        
-        # collect the results
-        results = ray.get(tasks)
+                batch_tasks.append(task)
 
-        # merge the results from all the tasks
-        for result in results:
-            processed_data, local_node_map, local_counter = result
-            # update global node ID and counter
-            for key, value in local_node_map.items():
-                if key not in global_node_id_map:
-                    global_node_id_map[key] = global_node_counter
-                    global_node_counter += 1
+            # collect the results
+            results = ray.get(batch_tasks)
 
-            # Save the processed data
-            # If processed_data is HeteroData, handle it accordingly
-            if isinstance(processed_data, HeteroData):
-                # Save the entire HeteroData object as a .pt file
-                torch.save(processed_data, osp.join(self.processed_dir, f'batch_{chunk_id}.pt'))
-            else:
-                for i, data in enumerate(processed_data):
-                    torch.save(data, osp.join(self.processed_dir, f'batch_{i}.pt'))
+            # merge the results from all the tasks
+            for result in results:
+                processed_data, local_node_map, local_counter = result
+                
+                # update global node ID and counter
+                global_node_id_map.update(local_node_map)
+                global_node_counter = max(global_node_counter, local_counter)
 
+                # Save the processed data
+                # If processed_data is HeteroData, handle it accordingly
+                if isinstance(processed_data, HeteroData):
+                    # Save the entire HeteroData object as a .pt file
+                    torch.save(processed_data, osp.join(self.processed_dir, f'batch_{chunk_id}.pt'))
+                else:
+                    for i, data in enumerate(processed_data):
+                        torch.save(data, osp.join(self.processed_dir, f'batch_{chunk_id}_{i}.pt'))
+
+            # Increment chunk_id for the next batch
+            chunk_id += 1
+            
         # Shutdown Ray after processing
         ray.shutdown()
 
@@ -166,7 +166,7 @@ class LabeledSubGraphs(Dataset):
 
 if __name__ == "__main__":
     # load pickle format of graph dataset with graph representations
-    data_path = Path.cwd().joinpath("test-small")
+    data_path = Path.cwd().joinpath("output")
 
     # create an instance of the dataset
     dataset = LabeledSubGraphs(root=data_path, batch_size=10)

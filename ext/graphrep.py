@@ -177,7 +177,8 @@ class FeatureExtractor:
             if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
                 for entity in entities:
                     cmd = " ".join(entity.get("Command", []))
-                    nodes.append(self._create_node(cmd, "CMD", row["Ecosystem"]))
+                    # node type is Command not CMD
+                    nodes.append(self._create_node(cmd, "Command", row["Ecosystem"]))
                     edges.append(self._create_edge(f"{row['Name']}_{row['Version']}", cmd, \
                                                    default_edge_type, default_edge_value))
         return nodes, edges
