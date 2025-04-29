@@ -5,7 +5,7 @@
  
  node: {
     'value': str value / numeric
-    "type": Package_Name | Path | IP | Hostname | Hostnames | Command | Port --- str content
+    "type": Package_Name | Path | IP | DNS Host | Hostnames | Command | Port --- str content
     "eco": cate
      }
 
@@ -13,7 +13,7 @@
     "source": x,
     "target": y,
     "value": str,
-    "type": Action (Path)| DNS(Hostname) | CMD (Command) | Socket (IP, Port, Hostnames)
+    "type": Action (Path)| DNS (DNS Host) | CMD (Command) | Socket (IP, Port, Hostnames)
 
  }
  
@@ -153,7 +153,7 @@ class FeatureExtractor:
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", ip, \
                                         default_edge_type, default_edge_value) for ip in ip_list])
 
-        nodes.extend([self._create_node(host, "Hostname", row["Ecosystem"]) for host in host_list])
+        nodes.extend([self._create_node(host, "DNS Host", row["Ecosystem"]) for host in host_list])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", host, \
                                         default_edge_type, default_edge_value) for host in host_list])
 
@@ -183,10 +183,12 @@ class FeatureExtractor:
                                                    default_edge_type, default_edge_value))
         return nodes, edges
 
+
     @staticmethod
     def _remove_duplicates(items: List[Dict]) -> List[Dict]:
         """Remove duplicate dictionaries from a list."""
         return list({frozenset(item.items()): item for item in items}.values())
+
 
     def _construct_subgraph(self, row: dict ) -> Dict:
         ''' extract nodes and  edges from different edges

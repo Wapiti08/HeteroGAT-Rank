@@ -16,8 +16,13 @@ from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
 from datetime import datetime
 from torch_geometric.data import HeteroData
-
+import os
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
+
+# predefined node types
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+
 
 def batch_dict(batch: HeteroData):
     ''' function to extract x_dict and edge_index_dict from custom batch data
@@ -38,6 +43,24 @@ def batch_dict(batch: HeteroData):
     }
 
     return x_dict, edge_index_dict, edge_attr_dict
+
+
+def miss_check(x_dict, node_types, hidden_dim):
+    for node_type in node_types:
+        if node_type not in x_dict:
+            # Dummy tensor to avoid breaking GATConv
+            x_dict[node_type] = torch.zeros((1, hidden_dim), device=device)
+
+    return x_dict
+
+
+# check the index and size to avoid cuda error
+def sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes):
+    src = edge_index[0]
+    tgt = edge_index[1]
+    valid_mask = (src < num_src_nodes) & (tgt < num_tgt_nodes)
+    return edge_index[:, valid_mask]
+
 
 class MaskedHeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):
@@ -94,6 +117,25 @@ class MaskedHeteroGAT(torch.nn.Module):
         # # Separate processing for 'package_name' if necessary
         # self.package_name_classifier = torch.nn.Linear(1, 1)
 
+    def mask_miss_edge(self, edge_index_dict):
+        masked_edge_index_dict = {}
+        for key in self.conv2.convs.keys():
+            if key in edge_index_dict:
+                edge_index = edge_index_dict[key]
+                num_edges = edge_index.size(1)
+                if num_edges > 0:
+                    mask = torch.bernoulli(self.edge_mask.expand(num_edges)).bool()
+                    if mask.sum() > 0:
+                        masked_edge_index_dict[key] = edge_index[:, mask]
+                    else:
+                        # fallback: keep original edge_index to avoid None
+                        masked_edge_index_dict[key] = edge_index
+                else:
+                    masked_edge_index_dict[key] = edge_index
+            else:
+                raise ValueError(f"❌ edge_index missing for expected edge type: {key}")
+        
+
     def forward(self, batch, **kwargs):
         '''
         :param x_dict: a dict holding node feature informaiton for each individual node type
@@ -101,6 +143,8 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
+        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
+        x_dict = miss_check(x_dict, node_types, hidden_dim)
 
         # apply edge masks (stochastic masking)
         masked_edge_index_dict = {
@@ -260,6 +304,17 @@ class HeteroGAT(torch.nn.Module):
         # Binary cross-entropy loss with optional class weighting
         self.loss_fn = nn.BCEWithLogitsLoss()
 
+    def miss_edge_index(self, edge_index_dict):
+        # Step 1: Get all expected edge types
+        expected_edge_types = set(self.conv2.convs.keys())
+
+        # Step 2: Patch missing edge types with empty edge_index
+        for edge_type in expected_edge_types:
+            if edge_type not in edge_index_dict:
+                edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, \
+                                                         device=next(self.parameters()).device)
+        
+        return edge_index_dict
 
     def forward(self, batch, **kwargs):
         '''
@@ -267,11 +322,27 @@ class HeteroGAT(torch.nn.Module):
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
-        
+
+        for edge_type, edge_index in edge_index_dict.items():
+            src_type, _, tgt_type = edge_type
+
+            num_src = x_dict[src_type].size(0)
+            num_tgt = x_dict[tgt_type].size(0)
+
+            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src, num_tgt)
+
         # first GAT layer + ReLU
         x_dict = self.conv1(x_dict, edge_index_dict)
-        x_dict = {key: F.relu(x) for key, x in x_dict.items()}
+        x_dict = {key: torch.relu(x) for key, x in x_dict.items()}
         # second GAT layer
+        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
+        # # check potential miss node types
+        x_dict = miss_check(x_dict, node_types, hidden_dim)
+        # check potential miss edge types
+        # print("before", edge_index_dict)
+        edge_index_dict = self.miss_edge_index(edge_index_dict)
+        # print("after", edge_index_dict)
+        
         x_dict = self.conv2(x_dict, edge_index_dict)
 
         # project to logits for classification
@@ -289,13 +360,20 @@ class HeteroGAT(torch.nn.Module):
         
         return: total loss across all node types
         '''
-        loss = 0
+        loss = torch.tensor(0, device=device)
+
         for node_type in logit_dict:
             if hasattr(batch[node_type], 'y'):
                 y_pred = logit_dict[node_type]
                 y_true = batch[node_type].y.float()
-                loss += self.loss_fn(y_pred, y_true)
 
+                print(f"[{node_type}] y_pred shape: {y_pred.shape}, y_true shape: {y_true.shape}")
+                print(f"[{node_type}] y_true unique values: {y_true.unique()}")
+
+                assert y_pred.shape == y_true.shape, "Shape mismatch between prediction and labels"
+                assert ((y_true == 0.0) | (y_true == 1.0)).all(), "Labels must be 0 or 1 for BCEWithLogitsLoss"
+
+                loss += self.loss_fn(y_pred, y_true)
         return loss
 
 
@@ -318,7 +396,7 @@ if __name__ == "__main__":
 
     model2 = HeteroGAT(
         hidden_channels=64,
-        out_channels=64,
+        out_channels=256,
         num_heads=4
     ).to(device)
 
@@ -341,7 +419,7 @@ if __name__ == "__main__":
             logic_dict = model2.forward(batch)
             # compute loss
             loss = model2.compute_loss(logic_dict, batch)
-
+            print(loss)
             # backward pass and optimization
             loss.backward()
             optimizer2.step()
@@ -369,8 +447,6 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
-    # predefined node types
-    node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 
     # define the starting time
     start_time = datetime.now()

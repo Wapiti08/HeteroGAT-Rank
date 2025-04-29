@@ -93,11 +93,7 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
         # concatenate encoded node value with encode eco value 
         combined_features = torch.cat((node_features, eco_feature), dim=1)
 
-        if node_type not in data:
-            data[node_type] = HeteroData()  # Ensure that the node type is initialized
-
-        # add node features for respective type and set num_nodes for each node type explicitly
-
+        # Add node features
         if hasattr(data[node_type], 'x') and data[node_type].x is not None:
             data[node_type].x = torch.cat((data[node_type].x, combined_features), dim=0)
         else:
@@ -107,7 +103,7 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
     # Set num_nodes explicitly
     for node_type in data.node_types:
-        data[node_type].num_nodes = data[node_type].x.size(0)
+        data[node_type]['num_nodes'] = data[node_type].x.size(0)
 
     # process edges (aligning edge indices with global node IDs)
     edge_tuples = []
