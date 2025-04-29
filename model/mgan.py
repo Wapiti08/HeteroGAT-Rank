@@ -17,6 +17,7 @@ from torch_geometric.loader import DataLoader
 from datetime import datetime
 from torch_geometric.data import HeteroData
 
+device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 def batch_dict(batch: HeteroData):
     ''' function to extract x_dict and edge_index_dict from custom batch data
@@ -314,9 +315,6 @@ if __name__ == "__main__":
         pin_memory=False,
         prefetch_factor=None
     )
-    
-    device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
-    batch=next(iter(dataloader))
 
     model2 = HeteroGAT(
         hidden_channels=64,
@@ -328,6 +326,7 @@ if __name__ == "__main__":
     num_epochs = 10
 
     print("Training HeteroGAT ...")
+
     # define the starting time
     start_time = datetime.now()
     for epoch in range(num_epochs):
@@ -357,6 +356,7 @@ if __name__ == "__main__":
     torch.save(model2, "heterogat_model.pth")
 
     print("Training MaskedHeteroGAT ...")
+    batch = next(iter(dataloader))
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
         hidden_channels=64, 
@@ -378,15 +378,9 @@ if __name__ == "__main__":
         total_loss = 0
         for batch in dataloader:
             batch=batch.to(device)
-
-            # extract necessary input from the batch
-            x_dict = batch.x
-            edge_index_dict = batch.edge_index
-            edge_attr_dict = batch.edge_attr
-            batch_indices = batch.batch_dict
             
             optimizer.zero_grad()
-            probs = model1(x_dict, edge_index_dict, edge_attr_dict, batch_indices, node_types)
+            probs = model1(batch)
             
             labels = batch.y.to(device)
             loss = model1(probs, labels)
