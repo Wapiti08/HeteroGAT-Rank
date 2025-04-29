@@ -60,6 +60,10 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
     nodes = subgraph['nodes']
     edges = subgraph['edges']
+    label = subgraph['label']
+    
+    # Add the label as a graph-level attribute
+    data['label'] = torch.tensor([label], dtype=torch.long)
 
     # process nodes
     node_indices = []
@@ -103,7 +107,7 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
 
     # process edges (aligning edge indices with global node IDs)
-    edge_indices = []
+    edge_tuples = []
     for edge in edges:
         # Use get_or_add_node to handle source and target nodes
         source_idx, global_node_id_map, global_node_counter = \
@@ -111,13 +115,13 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
         target_idx, global_node_id_map, global_node_counter = \
             get_or_add_node(edge['target'], global_node_id_map, global_node_counter)
 
-        edge_index = torch.tensor([[source_idx],[target_idx]], dtype=torch.long, device=device)
+        edge_tuples.append((source_idx, target_idx))
+        # transpose the lsit of tuples into a tensor of shape [2, num_edges]
+        edge_index = torch.tensor(edge_tuples, dtype=torch.long, device=device).t().contiguous()
 
         # add edge attribute (one-hot encoding for edge "value")
         edge_value = edge['value']
         edge_attr = cate_encoder(edge_value)
-
-        edge_indices.append(edge_index)
 
         edge_type = edge['type']
 
@@ -171,7 +175,7 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
             elif edge['target'] in ['Hostnames']:
                 data['Package_Name', 'Socket', 'Hostnames'].edge_index = edge_index
                 data['Package_Name', 'Socket', 'Hostnames'].edge_attr = edge_attr
-
+    
     return data, global_node_id_map, global_node_counter
 
 

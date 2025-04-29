@@ -15,6 +15,28 @@ import torch.nn.functional as F
 from ext.iter_loader import IterSubGraphs
 from torch_geometric.loader import DataLoader
 from datetime import datetime
+from torch_geometric.data import HeteroData
+
+
+def batch_dict(batch: HeteroData):
+    ''' function to extract x_dict and edge_index_dict from custom batch data
+    
+    '''
+    # extract node features into a dict
+    x_dict = {node_type: batch[node_type].x for node_type in batch.node_types if 'x' in batch[node_type]}
+    
+    # extract edge_index into a dict
+    edge_index_dict = {
+        edge_type: batch[edge_type].edge_index for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
+    }
+
+    # extract edge_attr into a dict
+    edge_attr_dict = {
+        edge_type: batch[edge_type].edge_attr for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
+
+    }
+
+    return x_dict, edge_index_dict, edge_attr_dict
 
 class MaskedHeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):
@@ -71,18 +93,19 @@ class MaskedHeteroGAT(torch.nn.Module):
         # # Separate processing for 'package_name' if necessary
         # self.package_name_classifier = torch.nn.Linear(1, 1)
 
-    def forward(self, x_dict, edge_index_dict, edge_attr_dict, batch, node_types, **kwargs):
+    def forward(self, batch, **kwargs):
         '''
         :param x_dict: a dict holding node feature informaiton for each individual node type
         :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
 
         '''
+        x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
+
         # apply edge masks (stochastic masking)
         masked_edge_index_dict = {
             # stochastic masking
             key: edge_index[:, torch.bernoulli(self.edge_mask).bool()]
             for key, edge_index in edge_index_dict.items()
-            if key in edge_index_dict  # Ensure only existing edge types are used
         }
 
         # apply node masks
@@ -239,13 +262,15 @@ class HeteroGAT(torch.nn.Module):
 
     def forward(self, batch, **kwargs):
         '''
-        :param x_dict: a dict holding node feature informaiton for each individual node type
-        :param edge_index_dict: a dict holding graph connectivity info for each individual edge type
+        args:
+            batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
         '''
-        x_dict, edge_index_dict = batch.x_dict, batch.edge_index_dict
-
+        x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
+        
+        # first GAT layer + ReLU
         x_dict = self.conv1(x_dict, edge_index_dict)
-        x_dict = {key: torch.relu(x) for key, x in x_dict.items()}
+        x_dict = {key: F.relu(x) for key, x in x_dict.items()}
+        # second GAT layer
         x_dict = self.conv2(x_dict, edge_index_dict)
 
         # project to logits for classification
@@ -275,7 +300,7 @@ class HeteroGAT(torch.nn.Module):
 
 if __name__ == "__main__":
 
-    data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
+    data_path = Path.cwd().parent.joinpath("ext", "output", "processed")
     print("Creating iterative dataset")
     dataset = IterSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
@@ -345,7 +370,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
     # predefined node types
-    node_types = ["Path", "Hostname", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+    node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 
     # define the starting time
     start_time = datetime.now()
@@ -355,9 +380,9 @@ if __name__ == "__main__":
             batch=batch.to(device)
 
             # extract necessary input from the batch
-            x_dict = batch.x_dict
-            edge_index_dict = batch.edge_index_dict
-            edge_attr_dict = batch.edge_attr_dict
+            x_dict = batch.x
+            edge_index_dict = batch.edge_index
+            edge_attr_dict = batch.edge_attr
             batch_indices = batch.batch_dict
             
             optimizer.zero_grad()
