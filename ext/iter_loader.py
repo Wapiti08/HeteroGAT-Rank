@@ -51,10 +51,6 @@ class IterSubGraphs(IterableDataset):
                 print(f"[Iter] Failed to load {file_path.name}: {e}")
                 continue
 
-            # Optional: check type and size
-            print(f"[Iter] batch type: {type(batch)}")
-            print(f"[Iter] batch keys: {batch.keys() if hasattr(batch, 'keys') else 'N/A'}")
-
             # calculate and set num_nodes
             for node_type in batch.keys():  # Now iterating over node types like 'Package_Name', 'Path', etc.
                 # Skip edge-related keys like 'edge_index' and 'edge_attr'
@@ -112,11 +108,6 @@ if __name__ == "__main__":
                 print(f"[Main] File {saved_filepath} saved successfully.")
             else:
                 print(f"[Main] File {saved_filepath} not found.")
-
-            time.sleep(0.5)  # Simulate processing time
-
-            # Optionally, remove break to continue iterating
-            break  # Only process the first batch for testing, remove this line to process all
 
     except Exception as e:
         print(f"[ERROR] DataLoader iteration failed: {e}")

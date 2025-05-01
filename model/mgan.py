@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv
+from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv, global_mean_pool
 from model import DiffPool
 from torch import nn
 import torch.nn.functional as F
@@ -17,6 +17,10 @@ from torch_geometric.loader import DataLoader
 from datetime import datetime
 from torch_geometric.data import HeteroData
 import os
+from sklearn.model_selection import train_test_split
+from utils import evals
+
+
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -56,6 +60,9 @@ def miss_check(x_dict, node_types, hidden_dim):
 
 # check the index and size to avoid cuda error
 def sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes):
+    ''' fix the problem when index of node is not matched with node size
+    
+    '''
     src = edge_index[0]
     tgt = edge_index[1]
     valid_mask = (src < num_src_nodes) & (tgt < num_tgt_nodes)
@@ -74,34 +81,34 @@ class MaskedHeteroGAT(torch.nn.Module):
             num_nodes: the number of nodes in a batch
         '''
         super(MaskedHeteroGAT, self).__init__()
-    
+
+        self.edge_types = [
+            ('Package_Name', 'Action', 'Path'),
+            ('Package_Name', 'DNS', 'DNS Host'),
+            ('Package_Name', 'CMD', 'Command'),
+            ('Package_Name', 'Socket', 'IP'),
+            ('Package_Name', 'Socket', 'Port'),
+            ('Package_Name', 'Socket', 'Hostnames'),
+        ]
+
         # learnable masks ---- initialized with 1
         self.edge_mask = torch.nn.Parameter(torch.ones(num_edges), requires_grad=True) 
         self.node_mask = torch.nn.Parameter(torch.ones(num_nodes), requires_grad=True)
     
         # GAT layers
         self.conv1 = HeteroConv(
-            {
-                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'DNS', 'DNS Host'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1, -1), hidden_channels, heads=num_heads, add_self_loops=False),
-            },
-            aggr='mean',  # aggregation method for multi-head attention
+            {et: GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
+                         add_self_loops=False)
+             for et in self.edge_types},
+              # aggregation method for multi-head attention
+            aggr='mean',
         )
 
         # define second layer
         self.conv2 = HeteroConv(
-            {
-                ('Package_Name', 'Action', 'Path'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'DNS', 'DNS Host'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'CMD', 'Command'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'IP'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'Port'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'Hostnames'): GATv2Conv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-            },
+            {et: GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
+                         add_self_loops=False)
+             for et in self.edge_types},
             aggr='mean',
         )
 
@@ -133,7 +140,7 @@ class MaskedHeteroGAT(torch.nn.Module):
                 else:
                     masked_edge_index_dict[key] = edge_index
             else:
-                raise ValueError(f"❌ edge_index missing for expected edge type: {key}")
+                raise ValueError(f"[-] edge_index missing for expected edge type: {key}")
         
 
     def forward(self, batch, **kwargs):
@@ -167,9 +174,9 @@ class MaskedHeteroGAT(torch.nn.Module):
             if node_type != "Package_Name":
 
                 # perform GAT layer
-                x_dict = self.conv1(masked_x_dict, masked_edge_index_dict)
+                out, (edge_index, alpha) = self.conv1(masked_x_dict, masked_edge_index_dict, return_attention_weights=True)
                 x_dict = {key: F.relu(x) for key, x in x_dict.items()}
-                x_dict = self.conv2(x_dict, masked_edge_index_dict)
+                out, (edge_index, alpha) = self.conv2(x_dict, masked_edge_index_dict, return_attention_weights=True)
 
                 # apply diffpool to hierarchical node embeddings
                 x_pooled, edge_pooled, batch_pooled = self.diffpool(
@@ -187,6 +194,22 @@ class MaskedHeteroGAT(torch.nn.Module):
         probs = self.subgraph_cls(final_embed, agg_edge)
 
         return probs
+    
+    def evaluate(self, logits, batch, threshold=0.5):
+        metrics = evals.evaluate(logits, batch, threshold)
+        print("evaluation result: \n", metrics )
+        return metrics
+
+    def plot_metrics(self, y_true, y_prob, metrics):
+        ''' plot roc and calculated metrics
+        
+        '''
+        # define the default save name
+        roc_save_path = "roc_curve_maskheterogat.png"
+        metric_save_path = "metrics_bar_maskheterogat.png"
+
+        evals.plot_roc(y_true, y_prob, roc_save_path)
+        evals.plot_metrics_bar(metrics, metric_save_path)
         
 
     def subgraph_cls(self, final_embed, agg_edge):
@@ -273,48 +296,67 @@ class HeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads):
         super(HeteroGAT, self).__init__()
 
-        # define first layer
+        self.edge_types = [
+            ('Package_Name', 'Action', 'Path'),
+            ('Package_Name', 'DNS', 'DNS Host'),
+            ('Package_Name', 'CMD', 'Command'),
+            ('Package_Name', 'Socket', 'IP'),
+            ('Package_Name', 'Socket', 'Port'),
+            ('Package_Name', 'Socket', 'Hostnames'),
+        ]
+
         self.conv1 = HeteroConv(
-            {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'DNS', 'DNS Host'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads, add_self_loops=False),
-                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-            },
+            {et: GATConv((-1, -1), hidden_channels, heads=num_heads,
+                         add_self_loops=False)
+             for et in self.edge_types},
             aggr='mean',
         )
 
-        # define second layer
         self.conv2 = HeteroConv(
-            {
-                ('Package_Name', 'Action', 'Path'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'DNS', 'DNS Host'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'CMD', 'Command'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'Socket', 'IP'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'Socket', 'Port'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-                ('Package_Name', 'Socket', 'Hostnames'): GATConv((-1,-1), hidden_channels, heads=num_heads,add_self_loops=False),
-            },
+            {et: GATConv((-1, -1), hidden_channels, heads=num_heads,
+                         add_self_loops=False)
+             for et in self.edge_types},
             aggr='mean',
         )
 
-        # add final projection layer to output logits for binary classification
-        self.classifier = nn.Linear(out_channels, 1)
         # Binary cross-entropy loss with optional class weighting
         self.loss_fn = nn.BCEWithLogitsLoss()
 
-    def miss_edge_index(self, edge_index_dict):
-        # Step 1: Get all expected edge types
-        expected_edge_types = set(self.conv2.convs.keys())
+        # assumes pooling from all non-package node types - Package_Name is always the src node
+        # self.classifier = nn.Linear(len(set(t for _, _, t in self.edge_types)) * hidden_channels * num_heads, 1)
 
-        # Step 2: Patch missing edge types with empty edge_index
-        for edge_type in expected_edge_types:
+
+    def miss_edge_index(self, edge_index_dict):
+        for edge_type in self.edge_types:
             if edge_type not in edge_index_dict:
                 edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, \
-                                                         device=next(self.parameters()).device)
+                                    device=next(self.parameters()).device)
         
         return edge_index_dict
+
+    def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
+        ''' custom version of HeteroGonv that returns attention weights
+        
+        returns:
+            - updated x_dict
+            - attn_weights: Dict[edge_type] = attention tensor
+        '''
+        attn_weights = {}
+        out_dict = {}
+
+        for edge_type, conv in conv_module.convs.items():
+            src_type, _, tgt_type = edge_type
+            x_src = x_dict[src_type]
+            x_tgt = x_dict[tgt_type]
+            edge_index = edge_index_dict[edge_type]
+
+            out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+            attn_weights[edge_type] = alpha
+
+            out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
+        
+        return out_dict, attn_weights
+
 
     def forward(self, batch, **kwargs):
         '''
@@ -323,58 +365,82 @@ class HeteroGAT(torch.nn.Module):
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
 
+        # sanitize edge indices
         for edge_type, edge_index in edge_index_dict.items():
             src_type, _, tgt_type = edge_type
 
             num_src = x_dict[src_type].size(0)
             num_tgt = x_dict[tgt_type].size(0)
-
+            # fix unmatched size and index for node
             edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src, num_tgt)
 
-        # first GAT layer + ReLU
-        x_dict = self.conv1(x_dict, edge_index_dict)
-        x_dict = {key: torch.relu(x) for key, x in x_dict.items()}
-        # second GAT layer
+        # ---- check for missing node/edge types before conv1
         hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
-        # # check potential miss node types
+        # check potential miss node types
         x_dict = miss_check(x_dict, node_types, hidden_dim)
-        # check potential miss edge types
-        # print("before", edge_index_dict)
         edge_index_dict = self.miss_edge_index(edge_index_dict)
-        # print("after", edge_index_dict)
+
+        # ---- first conv with attention
+        x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
+
+        # ---- check for missing node/edge types before conv2
+        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
+        # check potential miss node types
+        x_dict = miss_check(x_dict, node_types, hidden_dim)
+        edge_index_dict = self.miss_edge_index(edge_index_dict)
         
-        x_dict = self.conv2(x_dict, edge_index_dict)
+        # ---- second conv with attention
+        x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2,x_dict, edge_index_dict)
 
-        # project to logits for classification
-        logit_dict = {
-            key: self.classifier(x).squeeze(-1) for key, x in x_dict.items()
-        }
+        # ---- pooling per node type, excluding "Package_Name"
+        pooled_outputs = []
+        for node_type, x in x_dict.items():
+            if node_type == "Package_Name":
+                continue
+            if hasattr(batch[node_type], "batch"):
+                pooled = global_mean_pool(x, batch[node_type].batch)
+                pooled_outputs.append(pooled)
 
-        return logit_dict
+        # ---- final classification
+        graph_embed = torch.cat(pooled_outputs, dim=-1)
+
+        in_channels = graph_embed.shape[1]
+        # dynamically infer classifier input size
+        logits = nn.Linear(in_channels, 1).to(graph_embed.device)(graph_embed).squeeze(-1)
+
+        return logits, {"conv1": attn_weights_1, "conv2": attn_weights_2}
     
-    def compute_loss(self, logit_dict, batch):
+    
+    def compute_loss(self, logits, batch):
         ''' computer the binary classification loss
 
-        :param logit_dict: dictionary of logits for each node type
+        :param logits: the pooled total loss for subgraph-level classification
         :param x_dictL the dictionary of ground truth labels for each node type
         
         return: total loss across all node types
         '''
-        loss = torch.tensor(0, device=device)
+        y_true = batch['label'].float()
+        assert logits.shape == y_true.shape, f"Shape mismatch: {logits.shape} vs {y_true.shape}"
+        return self.loss_fn(logits, y_true)
 
-        for node_type in logit_dict:
-            if hasattr(batch[node_type], 'y'):
-                y_pred = logit_dict[node_type]
-                y_true = batch[node_type].y.float()
+    def evaluate(self, logits, batch, threshold=0.5):
+        metrics = evals.evaluate(logits, batch, threshold)
+        print("evaluation result: \n", metrics )
+        return metrics
+    
 
-                print(f"[{node_type}] y_pred shape: {y_pred.shape}, y_true shape: {y_true.shape}")
-                print(f"[{node_type}] y_true unique values: {y_true.unique()}")
+    def plot_metrics(self, y_true, y_prob, metrics):
+        ''' plot roc and calculated metrics
+        
+        '''
+        # define the default save name
+        roc_save_path = "roc_curve_heterogat.png"
+        metric_save_path = "metrics_bar_heterogat.png"
 
-                assert y_pred.shape == y_true.shape, "Shape mismatch between prediction and labels"
-                assert ((y_true == 0.0) | (y_true == 1.0)).all(), "Labels must be 0 or 1 for BCEWithLogitsLoss"
-
-                loss += self.loss_fn(y_pred, y_true)
-        return loss
+        evals.plot_roc(y_true, y_prob, roc_save_path)
+        evals.plot_metrics_bar(metrics, metric_save_path)
+        
 
 
 if __name__ == "__main__":
@@ -384,15 +450,27 @@ if __name__ == "__main__":
     dataset = IterSubGraphs(root=data_path, batch_size = 10)
     # load one .pt file at a time
     print("Creating subgraph dataloader")
-    dataloader = DataLoader(
-        dataset,
-        batch_size=1,
-        shuffle=False,
-        # num_workers=4,  # Reduce to test performance; 20 may be overkill for file I/O
-        # persistent_workers=True,
+    num_epochs = 10
+
+    # split into train/test
+    train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
+
+    train_loader = DataLoader(
+        train_data,
+        batch_size=10,
+        shuffle=True,
         pin_memory=False,
         prefetch_factor=None
     )
+
+    test_loader = DataLoader(
+        test_data,
+        batch_size=10,
+        shuffle=True,
+        pin_memory=False,
+        prefetch_factor=None
+    )
+
 
     model2 = HeteroGAT(
         hidden_channels=64,
@@ -401,40 +479,67 @@ if __name__ == "__main__":
     ).to(device)
 
     optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
-    num_epochs = 10
 
     print("Training HeteroGAT ...")
 
+    conv_weight_dict_2 = {}
     # define the starting time
     start_time = datetime.now()
     for epoch in range(num_epochs):
         model2.train()
         total_loss = 0
 
-        for batch in dataloader:
+        for batch in train_loader:
             batch = batch.to(next(model2.parameters()).device)  # Move batch to the same device as model
             optimizer2.zero_grad()
 
             # forward pass
-            logic_dict = model2.forward(batch)
+            logits, conv_weight_dict_2 = model2.forward(batch)
             # compute loss
-            loss = model2.compute_loss(logic_dict, batch)
-            print(loss)
+            loss = model2.compute_loss(logits, batch)
             # backward pass and optimization
             loss.backward()
             optimizer2.step()
 
             total_loss += loss.item()
         
-        avg_loss = total_loss/len(dataloader)
+        avg_loss = total_loss/len(train_loader)
+
+        # ----- EVALUATION -----
+        model2.eval()
+        all_logits = []
+        all_labels = []
+
+        with torch.no_grad():
+            for batch in test_loader:
+                batch = batch.to(next(model2.parameters()).device)
+                logits, _ = model2(batch)
+                all_logits.append(logits)
+                all_labels.append(batch['label'])
+
+        # Concatenate
+        all_logits = torch.cat(all_logits)
+        all_labels = torch.cat(all_labels)
+
+        # Compute metrics
+        metrics = model2.evaluate(all_logits, all_labels)
+
+        model2.plot_metrics(
+            all_labels,
+            torch.sigmoid(logits).cpu().numpy(),
+            metrics)
 
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+    
+
 
     print(f"Time spent for HeteroGAT is: {start_time - datetime.now()}")
+
     torch.save(model2, "heterogat_model.pth")
 
+
     print("Training MaskedHeteroGAT ...")
-    batch = next(iter(dataloader))
+    batch = next(iter(train_loader))
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
         hidden_channels=64, 
@@ -447,12 +552,11 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
-
     # define the starting time
     start_time = datetime.now()
     for epoch in range(num_epochs):
         total_loss = 0
-        for batch in dataloader:
+        for batch in train_loader:
             batch=batch.to(device)
             
             optimizer.zero_grad()
@@ -465,7 +569,39 @@ if __name__ == "__main__":
 
             total_loss += loss.item()
 
-        print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(dataloader)}")
+        print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(train_loader)}")
+    
+        # --- Evaluation -----
+        model1.eval()
+        all_logits = []
+        all_labels = []
+
+        with torch.no_grad():
+            for batch in test_loader:
+                batch = batch.to(next(model1.parameters()).device)
+                logits, _ = model1(batch)
+                all_logits.append(logits)
+                all_labels.append(batch['label'])
+        
+        # Concatenate
+        all_logits = torch.cat(all_logits)
+        all_labels = torch.cat(all_labels)
+
+        # Compute metrics
+        metrics = model1.evaluate(all_logits, all_labels)
+
+        # Compute metrics
+        metrics = model1.evaluate(all_logits, all_labels)
+
+        model1.plot_metrics(
+            all_labels,
+            torch.sigmoid(logits).cpu().numpy(),
+            metrics)
+
+
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+
     print(f"Time spent for MaskedHeteroGAT is: {start_time - datetime.now()}")
     # save the model after training
     torch.save(model1, "masked_heterogat_model.pth")

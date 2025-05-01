@@ -103,7 +103,7 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
     # Set num_nodes explicitly
     for node_type in data.node_types:
-        data[node_type]['num_nodes'] = data[node_type].x.size(0)
+        data[node_type].num_nodes = data[node_type].x.size(0)
 
     # process edges (aligning edge indices with global node IDs)
     edge_tuples = []
