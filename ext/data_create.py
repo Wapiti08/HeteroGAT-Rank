@@ -98,7 +98,7 @@ class LabeledSubGraphs(Dataset):
         pass
 
     @staticmethod
-    def get_max_parallel_tasks(task_cpus = 4, utilization_ratio=0.9):
+    def get_max_parallel_tasks(task_cpus = 3, utilization_ratio=0.95):
         # there are 32 total available cpus
         available = ray.available_resources().get("CPU", 32)  
         usable = int(available * utilization_ratio)
@@ -129,25 +129,22 @@ class LabeledSubGraphs(Dataset):
                 task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
                 batch_tasks.append(task)
 
-            # collect the results
-            results = ray.get(batch_tasks)
-
-            # merge the results from all the tasks
-            for result in results:
-                processed_data, local_node_map, local_counter = result
+            for task in batch_tasks:
+                processed_data, local_node_map, local_counter = ray.get(task)
                 
-                # update global node ID and counter
-                global_node_id_map.update(local_node_map)
-                global_node_counter = max(global_node_counter, local_counter)
+                if processed_data is not None:
+                    # update global node ID and counter
+                    global_node_id_map.update(local_node_map)
+                    global_node_counter = max(global_node_counter, local_counter)
 
-                # Save the processed data
-                # If processed_data is HeteroData, handle it accordingly
-                if isinstance(processed_data, HeteroData):
-                    # Save the entire HeteroData object as a .pt file
-                    torch.save(processed_data, osp.join(self.processed_dir, f'batch_{chunk_id}.pt'))
-                else:
-                    for i, data in enumerate(processed_data):
-                        torch.save(data, osp.join(self.processed_dir, f'batch_{chunk_id}_{i}.pt'))
+                    # Save the processed data
+                    # If processed_data is HeteroData, handle it accordingly
+                    if isinstance(processed_data, HeteroData):
+                        # Save the entire HeteroData object as a .pt file
+                        torch.save(processed_data, osp.join(self.processed_dir, f'batch_{chunk_id}.pt'))
+                    else:
+                        for i, data in enumerate(processed_data):
+                            torch.save(data, osp.join(self.processed_dir, f'batch_{chunk_id}_{i}.pt'))
 
             # Increment chunk_id for the next batch
             chunk_id += 1

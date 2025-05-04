@@ -10,7 +10,6 @@ import time
 from torch_geometric.data import HeteroData
 from torch_geometric.data import Batch
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class IterSubGraphs(IterableDataset):
@@ -21,6 +20,29 @@ class IterSubGraphs(IterableDataset):
         self.file_list = sorted(self.data_path.glob("batch_*.pt"))
         self.transform = transform
         print(f"[Init] Found {len(self.file_list)} files in {self.data_path}")
+
+    def __getitem__(self, index):
+        file_path = self.file_list[index]  # Retrieve the file path based on the index
+        
+        print(f"[GetItem] Loading {file_path.name}")
+        try:
+            batch = torch.load(file_path, map_location="cpu")
+
+            if batch is None:
+                print(f"[GetItem] Batch in {file_path.name} is None.")
+                return None
+            print(f"[GetItem] Loaded {file_path.name}")
+            
+        except Exception as e:
+            print(f"[GetItem] Failed to load {file_path.name}: {e}")
+            return None
+        
+        # Apply transformations if any
+        if self.transform:
+            batch = self.transform(batch)
+            print("[GetItem] Transform applied")
+        
+        return batch
 
     def __iter__(self):
 
