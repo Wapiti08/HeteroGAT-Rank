@@ -7,7 +7,7 @@ from torch_geometric.nn import DenseSAGEConv, dense_diff_pool
 class GNN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels,
                  normalize=False, lin=True):
-        super().__init__()
+        super(GNN, self).__init__()
 
         self.conv1 = DenseSAGEConv(in_channels, hidden_channels, normalize)
         self.bn1 = torch.nn.BatchNorm1d(hidden_channels)
@@ -46,7 +46,7 @@ class GNN(torch.nn.Module):
 
 class DiffPool(torch.nn.Module):
     def __init__(self, num_features, num_classes, max_nodes=150):
-        super().__init__()
+        super(DiffPool, self).__init__()
 
         num_nodes = ceil(0.25 * max_nodes)
         self.gnn1_pool = GNN(num_features, 64, num_nodes)

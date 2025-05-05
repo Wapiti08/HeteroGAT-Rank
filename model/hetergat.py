@@ -3,16 +3,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from torch_geometric.nn import HeteroConv, GATConv, GATv2Conv, global_mean_pool
-from model import DiffPool
+from torch_geometric.nn import HeteroConv, GATConv,global_mean_pool
 from torch import nn
 import torch.nn.functional as F
-from ext.iter_loader import IterSubGraphs
-from torch_geometric.loader import DataLoader
-from datetime import datetime
-from torch_geometric.data import HeteroData
 import os
-from sklearn.model_selection import train_test_split
 from utils import evals
 from utils.pregraph import *
 
@@ -95,7 +89,7 @@ class HeteroGAT(torch.nn.Module):
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
 
-        # sanitize edge indices
+        # sanitize edge indices before first conv
         for edge_type, edge_index in edge_index_dict.items():
             src_type, _, tgt_type = edge_type
 
@@ -120,8 +114,8 @@ class HeteroGAT(torch.nn.Module):
         # check potential miss node types
         x_dict = miss_check(x_dict, node_types, hidden_dim)
         edge_index_dict = self.miss_edge_index(edge_index_dict)
-        
-        # sanitize edge indices
+         
+        # sanitize edge indices before second conv
         for edge_type, edge_index in edge_index_dict.items():
             src_type, _, tgt_type = edge_type
 
