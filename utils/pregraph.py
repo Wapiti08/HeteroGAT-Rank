@@ -9,8 +9,6 @@ from torch import nn
 from datetime import datetime
 from torch_geometric.data import HeteroData
 import os
-from sklearn.model_selection import train_test_split
-from utils import evals
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')

@@ -100,7 +100,6 @@ if __name__ == "__main__":
                 logits, _ = model2(batch)
                 all_logits.append(logits)
                 all_labels.append(batch['label'])
-
         # Concatenate
         all_logits = torch.cat(all_logits)
         all_labels = torch.cat(all_labels)
@@ -110,7 +109,7 @@ if __name__ == "__main__":
 
         model2.plot_metrics(
             all_labels,
-            torch.sigmoid(logits).cpu().numpy(),
+            torch.sigmoid(all_logits).cpu().numpy(),
             metrics)
 
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")

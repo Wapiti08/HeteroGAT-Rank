@@ -44,6 +44,11 @@ def evaluate(logits, labels, threshold=0.5):
     
 
 def plot_roc(y_true, y_prob, save_path = "roc_curve.png"):
+    if isinstance(y_true, torch.Tensor):
+        y_true = y_true.cpu()
+    
+    if isinstance(y_prob, torch.Tensor):
+        y_prob = y_prob.cpu()
     fpr, tpr, _ = roc_curve(y_true, y_prob)
     roc_auc = auc(fpr, tpr)
 

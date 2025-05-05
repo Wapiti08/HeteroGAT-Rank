@@ -17,7 +17,8 @@ from utils.pregraph import *
 
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
-
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class MaskedHeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):

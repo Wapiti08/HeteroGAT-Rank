@@ -19,6 +19,8 @@ from utils.pregraph import *
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class HeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_heads):
@@ -104,6 +106,7 @@ class HeteroGAT(torch.nn.Module):
 
         # ---- check for missing node/edge types before conv1
         hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
+
         # check potential miss node types
         x_dict = miss_check(x_dict, node_types, hidden_dim)
         edge_index_dict = self.miss_edge_index(edge_index_dict)
@@ -118,6 +121,15 @@ class HeteroGAT(torch.nn.Module):
         x_dict = miss_check(x_dict, node_types, hidden_dim)
         edge_index_dict = self.miss_edge_index(edge_index_dict)
         
+        # sanitize edge indices
+        for edge_type, edge_index in edge_index_dict.items():
+            src_type, _, tgt_type = edge_type
+
+            num_src = x_dict[src_type].size(0)
+            num_tgt = x_dict[tgt_type].size(0)
+            # fix unmatched size and index for node
+            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src, num_tgt)
+
         # ---- second conv with attention
         x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2,x_dict, edge_index_dict)
 
