@@ -37,8 +37,8 @@ class MaskedHeteroGAT(torch.nn.Module):
         ]
 
         # learnable masks ---- initialized with 1
-        self.edge_mask = torch.nn.Parameter(torch.ones(num_edges), requires_grad=True) 
-        self.node_mask = torch.nn.Parameter(torch.ones(num_nodes), requires_grad=True)
+        # self.edge_mask = torch.nn.Parameter(torch.ones(num_edges), requires_grad=True) 
+        # self.node_mask = torch.nn.Parameter(torch.ones(num_nodes), requires_grad=True)
     
         # GAT layers
         self.conv1 = HeteroConv(
@@ -69,34 +69,50 @@ class MaskedHeteroGAT(torch.nn.Module):
         # # Separate processing for 'package_name' if necessary
         # self.package_name_classifier = torch.nn.Linear(1, 1)
 
-    def mask_miss_edge(self, edge_index_dict):
-        ''' masking function to handle cases where the number of edges is zero
-        or the shape of self.edge_mask doesn't match the number of edges
+    def miss_edge_index(self, edge_index_dict):
+        for edge_type in self.edge_types:
+            if edge_type not in edge_index_dict:
+                edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, \
+                                    device=next(self.parameters()).device)
         
-        '''
-        masked_edge_index_dict = {}
-        for key in self.conv2.convs.keys():
-            if key in edge_index_dict:
-                edge_index = edge_index_dict[key]
-                num_edges = edge_index.size(1)
-                if num_edges > 0:
-                    # ensure the mask size matches the number of edges in this batch
-                    mask = torch.bernoulli(self.edge_mask[:num_edges]).bool()
+        return edge_index_dict
+    # def mask_miss_edge(self, edge_index_dict):
+    #     ''' masking function to handle cases where the number of edges is zero
+    #     or the shape of self.edge_mask doesn't match the number of edges
+        
+    #     '''
+    #     masked_edge_index_dict = {}
+    #     for key in self.conv2.convs.keys():
+    #         if key in edge_index_dict:
+    #             edge_index = edge_index_dict[key]
+    #             num_edges = edge_index.size(1)
+    #             # ensure the mask size matches the number of edges in this batch
+    #             if num_edges > 0:
+    #                 # check if self.edge_mask is longer than or equal to num_edges
+    #                 if self.edge_mask.size(0) < num_edges:
+    #                     mask = torch.cat([
+    #                         torch.bernoulli(self.edge_mask).bool(),
+    #                         torch.ones(num_edges - self.edge_mask.size(0)).bool()
+    #                     ])
+    #                 else:
+    #                     mask = torch.bernoulli(self.edge_mask[:num_edges]).bool()
+    
+    #                 mask = mask.to(edge_index.device)
 
-                    if mask.sum() > 0:
-                        masked_edge_index_dict[key] = edge_index[:, mask]
-                    else:
-                        # fallback: keep original edge_index to avoid None
-                        masked_edge_index_dict[key] = edge_index
-                else:
-                    masked_edge_index_dict[key] = edge_index
-            else:
-                # Handle the case where the edge type is missing in edge_index_dict
-                print(f"Warning: Missing edge type '{key}' in edge_index_dict.")
-                # You can choose to either skip it or handle it in another way
-                masked_edge_index_dict[key] = None 
+    #                 if mask.sum() > 0:
+    #                     masked_edge_index_dict[key] = edge_index[:, mask]
+    #                 else:
+    #                     # fallback: keep original edge_index to avoid None
+    #                     masked_edge_index_dict[key] = edge_index
+    #             else:
+    #                 masked_edge_index_dict[key] = edge_index
+    #         else:
+    #             # Handle the case where the edge type is missing in edge_index_dict
+    #             print(f"Warning: Missing edge type '{key}' in edge_index_dict.")
+    #             # You can choose to either skip it or handle it in another way
+    #             masked_edge_index_dict[key] = None 
 
-        return masked_edge_index_dict
+    #     return masked_edge_index_dict
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
         ''' custom version of HeteroGonv that returns attention weights
@@ -109,12 +125,22 @@ class MaskedHeteroGAT(torch.nn.Module):
         out_dict = {}
 
         for edge_type, conv in conv_module.convs.items():
+            if edge_type not in edge_index_dict or edge_index_dict[edge_type] is None:
+                print(f"Warning: Missing edge type '{edge_type}' in edge_index_dict, skipping.")
+                continue  # Skip this edge type if the edge_index is None
+            
             src_type, _, tgt_type = edge_type
-            x_src = x_dict[src_type]
-            x_tgt = x_dict[tgt_type]
+
+            if src_type not in x_dict or tgt_type not in x_dict:
+                print(f"Warning: Missing node features for {src_type} or {tgt_type}. Skipping this edge type.")
+                continue  # Skip if node features are missing for source or target type
+        
+            x_src = x_dict[src_type].to(device)
+            x_tgt = x_dict[tgt_type].to(device)
+
             edge_index = edge_index_dict[edge_type]
-            print(type(edge_index))
-            print(edge_index)
+            # Move the edge index tensor to the same device
+            edge_index = edge_index.to(torch.long).to(device)
 
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
             attn_weights[edge_type] = alpha
@@ -145,45 +171,74 @@ class MaskedHeteroGAT(torch.nn.Module):
             # Fix unmatched size and index for the current edge type
             edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes, global_to_local_mapping)
     
-        # apply edge masks (stochastic masking)
-        masked_edge_index_dict = self.mask_miss_edge(edge_index_dict)
-
         # ---- check for missing node/edge types
         hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
         x_dict = miss_check(x_dict, node_types, hidden_dim)
+        edge_index_dict = self.miss_edge_index(edge_index_dict)
 
-        # apply node masks
-        masked_x_dict = {
-            # element-wise multiplication with node features
-            key: x * self.node_mask[:x.size(0)].reshape(-1,1)
-            if self.node_mask.size(0) >= x.size(0) else \
-                self.node_mask[:x.size(0)].expand(x.size(0), -1).reshape(-1,1)
-            for key, x in x_dict.items()
-        }
 
-        node_type_outputs = []
+        # ---- first conv with attention
+        x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
 
-        # process other node types (excluding "Package_Name")
-        for node_type in node_types:
-            if node_type != "Package_Name":
-                # perform GAT layer
-                x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, masked_x_dict, masked_edge_index_dict)
-                x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
-                out, (edge_index, alpha) = self.cal_attn_weight(self.conv2, x_dict, masked_edge_index_dict)
+        # ---- check for missing node/edge types before conv2
+        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
+        x_dict = miss_check(x_dict, node_types, hidden_dim)
+        edge_index_dict = self.miss_edge_index(edge_index_dict)
 
-                # apply diffpool to hierarchical node embeddings
-                x_pooled, edge_pooled, batch_pooled = self.dplayer(
-                    x_dict[node_type], masked_edge_index_dict[node_type], batch)
+        # Process each edge type and sanitize edge indices
+        for edge_type, edge_index in edge_index_dict.items():
+            src_type, _, tgt_type = edge_type
+            num_src_nodes = x_dict[src_type].size(0)  # Local node count for source type
+            num_tgt_nodes = x_dict[tgt_type].size(0)  # Local node count for target type
 
-                node_type_outputs.append(x_pooled)
+            # Debug: Print the number of nodes for this edge type
+            print(f"Sanitizing edge type {edge_type}: num_src_nodes = {num_src_nodes}, num_tgt_nodes = {num_tgt_nodes}")
 
-        # use the last pooled node features for classificaton
-        final_embed = node_type_outputs[-1]
+            # Fix unmatched size and index for the current edge type
+            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes, global_to_local_mapping)
 
-        # aggregate edge features 
+        x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
+
+        # ---- diffpool per node type, excluding "Package_Name"
+        dfpooled_outputs = []
+        for node_type, x in x_dict.items():
+            if node_type == "Package_Name":
+                continue
+            if hasattr(batch[node_type], "batch"):
+                # Iterate over the edge types in edge_index_dict
+                for (src_type, rel_type, tgt_type), edge_index in edge_index_dict.items():
+                    # Check if the current edge type matches the node type you're working with
+                    if src_type == node_type or tgt_type == node_type:
+                        # If it's a match, proceed with processing
+                        # Ensure edge_index is on the same device and has the correct type (long)
+                        edge_index = edge_index.to(torch.long).to(device)
+                        
+                        # Check if edge_index is empty and skip if so
+                        if edge_index.size(1) == 0:
+                            continue  # Skip this edge type if no edges are present
+                        
+                        max_node_index = x.shape[0] 
+                        valid_edges = (edge_index[0] < max_node_index) & (edge_index[1] < max_node_index)
+                        edge_index = edge_index[:, valid_edges]
+
+                        # Now you can safely pass this edge_index to your DiffPool layer
+                        x_pooled, edge_pooled, batch_pooled = self.dplayer(
+                            x, edge_index, batch
+                        )
+                        # Add pooled outputs to the list (or perform further operations as needed)
+                        dfpooled_outputs.append(batch_pooled)
+
+        if len(dfpooled_outputs) == 0:
+            raise ValueError("No node type outputs available for classification.")
+        
+        # Use the last pooled node features for classification
+        final_embed = dfpooled_outputs[-1]  # Last pooled output
+
+        # Aggregate edge features
         agg_edge = self.agg_edge_features(edge_attr_dict)
 
-        # pass through classification process for graph-level input
+        # Pass through classification process for graph-level input
         probs = self.subgraph_cls(final_embed, agg_edge)
 
         return probs
@@ -249,15 +304,15 @@ class MaskedHeteroGAT(torch.nn.Module):
         return norm_node_att
 
 
-    def ext_edge_att(self,):
-        ''' extract the importance of edges based on learned mask
+    # def ext_edge_att(self,):
+    #     ''' extract the importance of edges based on learned mask
 
-        '''
-        # normalize edge mask values
-        edge_att = self.edge_mask.detach().cpu()
-        norm_edge_att = edge_att / edge_att.sum()
+    #     '''
+    #     # normalize edge mask values
+    #     edge_att = self.edge_mask.detach().cpu()
+    #     norm_edge_att = edge_att / edge_att.sum()
 
-        return norm_edge_att
+    #     return norm_edge_att
 
     def rank_att(self, att_values):
         ''' rank importance of nodes / edges 

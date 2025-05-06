@@ -60,8 +60,8 @@ def global_to_local_map(x_dict, edge_index_dict):
         tgt_local_indices = torch.arange(num_tgt_nodes)
 
         # mapping global to local indices
-        global_to_local_map[src_type] = src_local_indices
-        global_to_local_map[tgt_type] = tgt_local_indices
+        global_to_local_map[src_type] = {i: idx for i, idx in enumerate(src_local_indices)}
+        global_to_local_map[tgt_type] = {i: idx for i, idx in enumerate(tgt_local_indices)}
     
     return global_to_local_map
 
@@ -80,9 +80,47 @@ def remap_edge_indices(edge_index, global_to_local_mapping):
     src = edge_index[0]
     tgt = edge_index[1]
 
-    # Use the local_to_global_mapping to convert global indices to local indices
-    src_local = torch.tensor([torch.where(global_to_local_mapping[src.item()] == src.item())[0].item() for src in src])
-    tgt_local = torch.tensor([torch.where(global_to_local_mapping[tgt.item()] == tgt.item())[0].item() for tgt in tgt])
+    # Initialize lists to store the local indices
+    src_local = []
+    tgt_local = []
+
+    for s in src:
+        s_item = s.item()
+        found = False
+        for node_type, mapping in global_to_local_mapping.items():
+            if s_item in mapping:
+                src_local.append(mapping[s_item])
+                found = True
+                break
+        if not found:
+            # print(f"Warning: Node {s_item} not found in global_to_local_mapping. Skipping this edge.")
+            src_local.append(0)  # Handle missing node gracefully
+
+    for t in tgt:
+        t_item = t.item()
+        found = False
+        for node_type, mapping in global_to_local_mapping.items():
+            if t_item in mapping:
+                tgt_local.append(mapping[t_item])
+                found = True
+                break
+        if not found:
+            # print(f"Warning: Node {t_item} not found in global_to_local_mapping. Skipping this edge.")
+            tgt_local.append(0)  # Handle missing node gracefully
+
+    # Skip the edge if either list is empty
+    if not src_local or not tgt_local:
+        print("Skipping this edge due to empty source or target list.")
+        return torch.empty(2, 0)  # Return an empty tensor for invalid edges
+
+    # Convert lists back to tensors
+    src_local = torch.tensor(src_local)
+    tgt_local = torch.tensor(tgt_local)
+
+    # Check if the tensors have the same size
+    if src_local.size(0) != tgt_local.size(0):
+        print(f"Error: Mismatched sizes: src_local = {src_local.size(0)}, tgt_local = {tgt_local.size(0)}")
+        return torch.empty(2, 0)  # Return an empty tensor in case of size mismatch
 
     # Stack and return the remapped edge indices
     remapped_edge_index = torch.stack([src_local, tgt_local], dim=0)

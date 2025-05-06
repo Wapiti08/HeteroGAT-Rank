@@ -33,6 +33,8 @@ import pickle
 import numpy as np
 import psutil
 from ext import hetergraph
+import gc
+
 
 def load_in_chunks(file_path, chunk_size):
     with open(file_path, 'rb') as fr:
@@ -74,9 +76,11 @@ class LabeledSubGraphs(Dataset):
 
     @staticmethod
     def get_adaptive_batch_size(default_bs):
-        total_mem = psutil.virtual_memory().total/(1024 * 3)
-        if total_mem < 16:
-            return max(1, default_bs/2)
+        available_mem = psutil.virtual_memory().available / (1024 * 1024 * 1024)  # in GB
+        if available_mem < 16:
+            return max(1, default_bs // 2)
+        elif available_mem < 64:
+            return max(1, default_bs // 1.5)
         return default_bs
 
     @property
@@ -98,9 +102,9 @@ class LabeledSubGraphs(Dataset):
         pass
 
     @staticmethod
-    def get_max_parallel_tasks(task_cpus = 3, utilization_ratio=0.95):
-        # there are 32 total available cpus
-        available = ray.available_resources().get("CPU", 32)  
+    def get_max_parallel_tasks(task_cpus = 2, utilization_ratio=0.98):
+        # there are 48 total available cpus
+        available = ray.available_resources().get("CPU", 48)  
         usable = int(available * utilization_ratio)
         return max(1, usable // task_cpus)
 
@@ -111,7 +115,7 @@ class LabeledSubGraphs(Dataset):
         
         ray.shutdown()
         # Set OOM mitigation variables before initializing Ray
-        os.environ["RAY_memory_usage_threshold"] = "0.9"  # Adjust based on node capacity
+        os.environ["RAY_memory_usage_threshold"] = "0.85"  # Adjust based on node capacity
         os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
 
         # initialize ray
@@ -146,8 +150,11 @@ class LabeledSubGraphs(Dataset):
                         for i, data in enumerate(processed_data):
                             torch.save(data, osp.join(self.processed_dir, f'batch_{chunk_id}_{i}.pt'))
 
+
             # Increment chunk_id for the next batch
             chunk_id += 1
+            # force garbage collection
+            gc.collect() 
             
         # Shutdown Ray after processing
         ray.shutdown()
