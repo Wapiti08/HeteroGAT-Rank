@@ -27,7 +27,9 @@ if __name__ == "__main__":
 
     data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
     print("Creating iterative dataset")
-    dataset = IterSubGraphs(root=data_path, batch_size = 10)
+    # return a batch of 10 subgraphs based on saved format
+    dataset = IterSubGraphs(root=data_path, batch_size = 1)
+
     # load one .pt file at a time
     print("Creating subgraph dataloader")
     num_epochs = 10
@@ -37,7 +39,7 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(
         train_data,
-        batch_size=10,
+        batch_size=1,
         shuffle=True,
         pin_memory=False,
         prefetch_factor=None
@@ -45,7 +47,7 @@ if __name__ == "__main__":
 
     test_loader = DataLoader(
         test_data,
-        batch_size=10,
+        batch_size=1,
         shuffle=True,
         pin_memory=False,
         prefetch_factor=None
@@ -126,7 +128,7 @@ if __name__ == "__main__":
         out_channels=64, 
         num_heads=4, 
         # use small clusters to reduce computation overhead
-        num_clusters=3, 
+        num_clusters=2, 
         num_edges = batch.num_edges, 
         num_nodes= batch.num_nodes   
     ).to(device)

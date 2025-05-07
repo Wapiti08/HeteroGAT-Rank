@@ -14,7 +14,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class IterSubGraphs(IterableDataset):
     
-    def __init__(self, root, batch_size=10, transform=None):
+    def __init__(self, root, batch_size=1, transform=None):
         self.batch_size = batch_size
         self.data_path = Path(root)
         self.file_list = sorted(self.data_path.glob("batch_*.pt"))

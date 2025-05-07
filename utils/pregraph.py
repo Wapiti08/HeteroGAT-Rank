@@ -110,7 +110,7 @@ def remap_edge_indices(edge_index, global_to_local_mapping):
 
     # Skip the edge if either list is empty
     if not src_local or not tgt_local:
-        print("Skipping this edge due to empty source or target list.")
+        # print("Skipping this edge due to empty source or target list.")
         return torch.empty(2, 0)  # Return an empty tensor for invalid edges
 
     # Convert lists back to tensors
