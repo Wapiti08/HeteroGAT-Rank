@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from torch_geometric.nn import HeteroConv, GATv2Conv,GATConv,global_mean_pool
+from torch_geometric.nn import HeteroConv, GATv2Conv
 from model import diffpool
 import torch.nn.functional as F
 import os
@@ -15,9 +15,10 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class MaskedHeteroGAT(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels, num_heads, num_clusters, num_edges, num_nodes):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, num_clusters):
         '''
         args:
+            in_channels: the dimensionality of the input node features
             hidden_channels: the dimensionality of the hidden node embeddings
             out_channels: the output dimension of the GAT layer before passing to the cls head
             num_heads: the number of attention heads in the GATv2Conv layers
@@ -54,11 +55,8 @@ class MaskedHeteroGAT(torch.nn.Module):
         )
 
         # diffpool layer for hierarchical feature aggregation
-        self.dplayer = diffpool.HeteroDiffPool(
-            node_types=node_types,
-            edge_types=self.edge_types,
-            num_features = out_channels * num_heads,
-            num_classes = num_clusters,
+        self.hetero_gnn = diffpool.HeteroGNN(
+            node_types, in_channels, hidden_channels, out_channels
             )
 
         # Classifier for binary classification (output of size 1), consider extra input for edge info
@@ -160,18 +158,22 @@ class MaskedHeteroGAT(torch.nn.Module):
         x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
         # ---- diffpool per node type, excluding "Package_Name"
-        dfpooled_output = self.dplayer(x_dict, edge_index_dict)
-        print(dfpooled_output)
-        # Use the last pooled node features for classification
-        final_embed = dfpooled_outputs[-1]  # Last pooled output
+        s_dict = self.hetero_gnn(x_dict, edge_index_dict)
 
-        # Aggregate edge features
-        agg_edge = self.agg_edge_features(edge_attr_dict)
+        pooled_x_dict, pooled_adj_dict, link_loss, ent_loss = diffpool.hetero_diff_pool(
+                    x_dict, edge_index_dict, s_dict
+                )
 
-        # Pass through classification process for graph-level input
-        probs = self.subgraph_cls(final_embed, agg_edge)
+        # # Use the last pooled node features for classification
+        # final_embed = dfpooled_output[-1]  # Last pooled output
 
-        return probs
+        # # Aggregate edge features
+        # agg_edge = self.agg_edge_features(edge_attr_dict)
+
+        # # Pass through classification process for graph-level input
+        # probs = self.subgraph_cls(final_embed, agg_edge)
+
+        return link_loss + ent_loss
     
     def evaluate(self, logits, batch, threshold=0.5):
         metrics = evals.evaluate(logits, batch, threshold)

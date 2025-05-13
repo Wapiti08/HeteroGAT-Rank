@@ -97,7 +97,7 @@ class LabeledSubGraphs(Dataset):
     @staticmethod
     def get_max_parallel_tasks(task_cpus = 2, utilization_ratio=0.98):
         # there are 48 total available cpus
-        available = ray.available_resources().get("CPU", 48)  
+        available = ray.available_resources().get("CPU", 32)  
         usable = int(available * utilization_ratio)
         return max(1, usable // task_cpus)
 
@@ -107,8 +107,9 @@ class LabeledSubGraphs(Dataset):
                              "subgraphs.pkl")
         
         ray.shutdown()
+
         # Set OOM mitigation variables before initializing Ray
-        os.environ["RAY_memory_usage_threshold"] = "0.85"  # Adjust based on node capacity
+        os.environ["RAY_memory_usage_threshold"] = "0.95"  # Adjust based on node capacity
         os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
 
         # initialize ray

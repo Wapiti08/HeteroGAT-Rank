@@ -120,7 +120,7 @@ if __name__ == "__main__":
     # torch.save(model2, "heterogat_model.pth")
 
     print("Training MaskedHeteroGAT ...")
-    batch = next(iter(train_loader))
+    # batch = next(iter(train_loader))
 
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
@@ -129,8 +129,8 @@ if __name__ == "__main__":
         num_heads=4, 
         # use small clusters to reduce computation overhead
         num_clusters=2, 
-        num_edges = batch.num_edges, 
-        num_nodes= batch.num_nodes   
+        # num_edges = batch.num_edges, 
+        # num_nodes= batch.num_nodes   
     ).to(device)
 
     optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)

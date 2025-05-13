@@ -1,4 +1,4 @@
-ray==2.40.0
+ray[cgraph]!=2.44.*,>=2.43.0
 scikit-learn==1.6.0
 dask==2023.5.0
 torch-geometric==2.6.1

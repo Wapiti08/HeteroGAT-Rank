@@ -26,7 +26,8 @@ class IterSubGraphs(IterableDataset):
         
         print(f"[GetItem] Loading {file_path.name}")
         try:
-            batch = torch.load(file_path, map_location="cpu")
+            # set up weights_only to avoid loading error
+            batch = torch.load(file_path, map_location="cpu", weights_only=False)
 
             if batch is None:
                 print(f"[GetItem] Batch in {file_path.name} is None.")
