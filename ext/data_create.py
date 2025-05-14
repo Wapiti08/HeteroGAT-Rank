@@ -34,6 +34,20 @@ import numpy as np
 import psutil
 from ext import hetergraph
 import gc
+from utils import sparsepad
+
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+
+edge_types = [
+            ('Package_Name', 'Action', 'Path'),
+            ('Package_Name', 'DNS', 'DNS Host'),
+            ('Package_Name', 'CMD', 'Command'),
+            ('Package_Name', 'Socket', 'IP'),
+            ('Package_Name', 'Socket', 'Port'),
+            ('Package_Name', 'Socket', 'Hostnames'),
+        ]
+
+
 
 
 def load_in_chunks(file_path, chunk_size):
@@ -41,6 +55,7 @@ def load_in_chunks(file_path, chunk_size):
         data = pickle.load(fr)
         for i in range(0, len(data), chunk_size):
             yield data[i:i+chunk_size]
+
 
 @ray.remote
 def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
@@ -60,9 +75,36 @@ def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
 
     return data, global_node_id_map, global_node_counter
 
+
+def get_max_size(file_path):
+    # Step 1: Load the data from the pickle file
+    with open(file_path, 'rb') as fr:
+        data = pickle.load(fr)
+
+    # Step 2: Initialize the variables to track max nodes and max edges
+    max_nodes_in_batch = 0
+    max_edges_in_batch = 0
+
+    # Step 3: Traverse through each subgraph to find the max nodes and edges
+    for subgraph in data:
+        # Get the number of nodes
+        num_nodes = len(subgraph['nodes'])  # Assuming 'nodes' is a list or similar structure
+        max_nodes_in_batch = max(max_nodes_in_batch, num_nodes)
+        
+        # Get the number of edges
+        num_edges = len(subgraph['edges']) # Assuming 'edge_index' is a 2D tensor of shape [2, num_edges]
+        max_edges_in_batch = max(max_edges_in_batch, num_edges)
+
+    # Step 4: The max_size is the maximum of max_nodes and max_edges
+    max_size = max(max_nodes_in_batch, max_edges_in_batch)
+    
+    print(f"Max size for padding: {max_size}")
+    return max_size
+
+
 class LabeledSubGraphs(Dataset):
     
-    def __init__(self, root, batch_size=10, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, batch_size, transform, pre_transform, pre_filter):
         '''
         :param root: root directory where the dataset is stored
         :param batch_size: number of subgraphs to store in a single file
@@ -101,10 +143,44 @@ class LabeledSubGraphs(Dataset):
         usable = int(available * utilization_ratio)
         return max(1, usable // task_cpus)
 
+
+    @staticmethod
+    def pad_subgraph(subgraph, max_num, target_feature_dim=400):
+        """
+        Pads the subgraph's node features and edge index to match the max_nodes
+        :param subgraph: The subgraph (HeteroData) to pad
+        :param max_num: the max number among max_nodes and max_edges
+        :return: The padded subgraph
+        """
+        for node_type in node_types:
+            # get node features
+            node_features = subgraph[node_type].x if node_type in \
+                subgraph.node_types else sparsepad.sparse_zeros(max_num, target_feature_dim)
+            
+            if node_features.size(0) < max_num:
+                subgraph[node_type].x = sparsepad.sparse_padding_with_values(node_features, max_num, target_feature_dim)
+
+            # pad edge index
+            for edge_type in edge_types:
+                edge_index = subgraph[edge_type].edge_index if edge_type in \
+                    subgraph.edge_types else sparsepad.sparse_zeros(2, max_num)
+                
+                num_edges = edge_index.size(1)
+
+                # cal necessary padding size
+                padding_size = max_num - num_edges
+                if padding_size > 0:
+                    # edge_index is [2, max_num]
+                    subgraph[edge_type].edge_index = sparsepad.sparse_padding_with_values(edge_index, 2, max_num)
+
+        return subgraph
+    
     def process(self,):
         # load the raw data --- non-packaged directory to avoid large size package to Ray
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
                              "subgraphs.pkl")
+        # get global max size in max_nodes and max_edges
+        max_size = get_max_size(raw_path)
         
         ray.shutdown()
 
@@ -121,8 +197,10 @@ class LabeledSubGraphs(Dataset):
         global_node_id_map = {}
         global_node_counter = 0
 
+        # process in chunks, like every 100 subgraphs every time in 9k
         for batch in load_in_chunks(raw_path, self.batch_size):
             batch_tasks = []
+
             for subgraph in batch:
                 task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
                 batch_tasks.append(task)
@@ -141,14 +219,11 @@ class LabeledSubGraphs(Dataset):
                         global_node_id_map.update(local_node_map)
                         global_node_counter = max(global_node_counter, local_counter)
 
-                        # Save the processed data
-                        # If processed_data is HeteroData, handle it accordingly
-                        if isinstance(processed_data, HeteroData):
-                            # Save the entire HeteroData object as a .pt file
-                            torch.save(processed_data, osp.join(self.processed_dir, f'batch_{chunk_id}.pt'))
-                        else:
-                            for i, data in enumerate(processed_data):
-                                    torch.save(data, osp.join(self.processed_dir, f'batch_{chunk_id}_{i}.pt'))
+                        # fill missing nodes and saved processed data
+                        processed_data = self.pad_subgraph(processed_data, max_size)
+
+                        # Save the entire HeteroData object as a .pt file
+                        torch.save(processed_data, osp.join(self.processed_dir, f'subgraph_{chunk_id}.pt'))
                 
                 # Remove the tasks that have been processed
                 batch_tasks = remaining
@@ -175,7 +250,7 @@ if __name__ == "__main__":
     data_path = Path.cwd().joinpath("output")
 
     # create an instance of the dataset
-    dataset = LabeledSubGraphs(root=data_path, batch_size=10)
+    dataset = LabeledSubGraphs(data_path, 5, None, None, None)
 
     # access the length of dataset
     print(f"Dataset length: {len(dataset)}")

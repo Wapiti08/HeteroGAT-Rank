@@ -5,7 +5,7 @@
  '''
 
 import torch
-from torch_geometric.nn import HeteroConv, DenseSAGEConv
+from torch_geometric.nn import HeteroConv, SAGEConv
 from torch_geometric.data import HeteroData
 import torch.nn.functional as F
 from torch import Tensor
@@ -100,8 +100,8 @@ class HeteroGNN(torch.nn.Module):
         self.node_type_encoders = nn.ModuleDict()
 
         for node_type in node_types:
-            # define the SAGEConv layer for each node type
-            self.node_type_encoders[node_type] = DenseSAGEConv(
+            # define the SAGEConv layer for each node type --- accept sparse matrix
+            self.node_type_encoders[node_type] = SAGEConv(
                 in_channels, hidden_channels
             )
 
@@ -127,6 +127,11 @@ class HeteroGNN(torch.nn.Module):
             for (src_node_type, edge_type, tgt_node_type), edge_index in edge_index_dict.items():
                 if src_node_type == node_type or tgt_node_type == node_type:
                     # apply DenseSAGEConv for the current node type
+                    x = x.to(device)
+                    edge_index = edge_index.to(device)
+                    x = x.float()  # Ensures x is float32
+                    edge_index = edge_index.float()  # Ensures edge_index is int64
+                    print(x.shape, edge_index.shape)
                     node_features = self.node_type_encoders[node_type](x, edge_index)
 
                     # compute the assignment matrix for each node type (using softmax)

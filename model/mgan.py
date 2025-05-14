@@ -16,12 +16,20 @@ from sklearn.model_selection import train_test_split
 from utils import evals
 from model.hetergat import HeteroGAT
 from model.mhetergat import MaskedHeteroGAT
+from torch_geometric.utils import to_dense_batch
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+
+def custom_collate_fn(batch):
+    ''' align with node numbers in every batch
+    
+    '''
+    
+
 
 if __name__ == "__main__":
 
@@ -120,17 +128,14 @@ if __name__ == "__main__":
     # torch.save(model2, "heterogat_model.pth")
 
     print("Training MaskedHeteroGAT ...")
-    # batch = next(iter(train_loader))
+    batch = next(iter(train_loader))
 
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
+        in_channels= list(batch.num_node_features.values())[0],
         hidden_channels=64, 
         out_channels=64, 
         num_heads=4, 
-        # use small clusters to reduce computation overhead
-        num_clusters=2, 
-        # num_edges = batch.num_edges, 
-        # num_nodes= batch.num_nodes   
     ).to(device)
 
     optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
@@ -140,17 +145,16 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         total_loss = 0
         for batch in train_loader:
+            
             batch=batch.to(device)
-            
+
             optimizer.zero_grad()
-            probs = model1(batch)
-            
+            probs, loss, attn_weights_pooled = model1(batch)
             labels = batch.y.to(device)
-            loss = model1(probs, labels)
-            loss.backward()
-            optimizer.step()
 
             total_loss += loss.item()
+            loss.backward()
+            optimizer.step()
 
         print(f"For MaskedHeteroGAT Time: Epoch {epoch+1}, Loss: {total_loss / len(train_loader)}")
     

@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 from torch_geometric.nn import HeteroConv, GATv2Conv
-from model import diffpool
+from optim import diffpool
 import torch.nn.functional as F
 import os
 from utils import evals
@@ -22,7 +22,7 @@ device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class NSHeteroGAT(torch.nn.Module):
 
-    def __init__(self,  hidden_channels, out_channels, num_heads, num_clusters, fanout=10):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, num_clusters, fanout=10):
         ''' 
         args:
             fanout: number of neighbors to sample for each node --- start with small number 10
@@ -57,15 +57,13 @@ class NSHeteroGAT(torch.nn.Module):
         )
 
         # diffpool layer for hierarchical feature aggregation
-        self.dplayer = diffpool.HeteroDiffPool(
-            node_types=node_types,
-            edge_types=self.edge_types,
-            num_features = out_channels * num_heads,
-            num_classes = num_clusters,
+        self.hetero_gnn = diffpool.HeteroGNN(
+            node_types, in_channels, hidden_channels, out_channels
             )
-        
+
         # define fixed number for edge selection
         self.fanout = fanout
+
 
         # Classifier for binary classification (output of size 1), consider extra input for edge info
         self.classifier = torch.nn.Linear(out_channels * num_heads, 1)
@@ -83,6 +81,7 @@ class NSHeteroGAT(torch.nn.Module):
         
         edge_sampler = sampler.
 
+    
 
 if __name__ == "__main__":
     # perform an ablation study

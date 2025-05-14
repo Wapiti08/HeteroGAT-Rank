@@ -17,7 +17,7 @@ class IterSubGraphs(IterableDataset):
     def __init__(self, root, batch_size=1, transform=None):
         self.batch_size = batch_size
         self.data_path = Path(root)
-        self.file_list = sorted(self.data_path.glob("batch_*.pt"))
+        self.file_list = sorted(self.data_path.glob("subgraph_*.pt"))
         self.transform = transform
         print(f"[Init] Found {len(self.file_list)} files in {self.data_path}")
 
@@ -30,7 +30,7 @@ class IterSubGraphs(IterableDataset):
             batch = torch.load(file_path, map_location="cpu", weights_only=False)
 
             if batch is None:
-                print(f"[GetItem] Batch in {file_path.name} is None.")
+                print(f"[GetItem] subgraph in {file_path.name} is None.")
                 return None
             print(f"[GetItem] Loaded {file_path.name}")
             
@@ -65,7 +65,7 @@ class IterSubGraphs(IterableDataset):
                 batch = torch.load(file_path, map_location="cpu")
 
                 if batch is None:
-                    print(f"[Iter] Batch in {file_path.name} is None.")
+                    print(f"[Iter] subgraph in {file_path.name} is None.")
                     continue
                 print(f"[Iter] Loaded {file_path.name}")
                 print(f"[Iter] Loaded {file_path.name}")
@@ -121,7 +121,7 @@ if __name__ == "__main__":
             print(f"[Main] --- BATCH {idx} RECEIVED ---")
             # Check if batch is None
             if batch is None:
-                print(f"[Main] Batch is None, skipping.")
+                print(f"[Main] subgraph is None, skipping.")
                 continue
 
             # Check if the saved file exists

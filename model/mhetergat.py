@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 from torch_geometric.nn import HeteroConv, GATv2Conv
-from model import diffpool
+from optim import diffpool
 import torch.nn.functional as F
 import os
 from utils import evals
@@ -14,15 +14,15 @@ node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
+
 class MaskedHeteroGAT(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, num_clusters):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_heads):
         '''
         args:
             in_channels: the dimensionality of the input node features
             hidden_channels: the dimensionality of the hidden node embeddings
             out_channels: the output dimension of the GAT layer before passing to the cls head
             num_heads: the number of attention heads in the GATv2Conv layers
-            num_clusters: the number of clusters used in DiffPool layer for hierarchical feature aggregation
             num_edges: the number of edges in a batch
             num_nodes: the number of nodes in a batch
         '''
@@ -56,7 +56,7 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         # diffpool layer for hierarchical feature aggregation
         self.hetero_gnn = diffpool.HeteroGNN(
-            node_types, in_channels, hidden_channels, out_channels
+            in_channels, hidden_channels, out_channels
             )
 
         # Classifier for binary classification (output of size 1), consider extra input for edge info
@@ -155,7 +155,7 @@ class MaskedHeteroGAT(torch.nn.Module):
             # Fix unmatched size and index for the current edge type
             edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes, global_to_local_mapping)
 
-        x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
+        # x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
         # ---- diffpool per node type, excluding "Package_Name"
         s_dict = self.hetero_gnn(x_dict, edge_index_dict)
@@ -163,17 +163,28 @@ class MaskedHeteroGAT(torch.nn.Module):
         pooled_x_dict, pooled_adj_dict, link_loss, ent_loss = diffpool.hetero_diff_pool(
                     x_dict, edge_index_dict, s_dict
                 )
+        # last attention weight calculation after pooling
+        x_dict_pooled, attn_weights_pooled = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
 
-        # # Use the last pooled node features for classification
-        # final_embed = dfpooled_output[-1]  # Last pooled output
-
+        # --- continue with binary classification task at subgraph-level
+        ## do not choose x_dict_pooled because of it is not the final embeddings
+        final_embed = pooled_x_dict
         # # Aggregate edge features
-        # agg_edge = self.agg_edge_features(edge_attr_dict)
+        agg_edge = self.agg_edge_features(edge_attr_dict)
 
-        # # Pass through classification process for graph-level input
-        # probs = self.subgraph_cls(final_embed, agg_edge)
+        # combine pooled node features and aggregated edge features for classification
+        all_pooled_nodes = torch.cat(list(final_embed.values()), dim=0)
 
-        return link_loss + ent_loss
+        if agg_edge is not None:
+            combined_features = torch.cat([all_pooled_nodes, agg_edge.view(-1,1)], dim=-1)
+        else:
+            combined_features = all_pooled_nodes
+        
+        logits = self.classifier(combined_features)
+        probs = torch.sigmoid(logits)
+
+        return probs, link_loss + ent_loss, attn_weights_pooled
+    
     
     def evaluate(self, logits, batch, threshold=0.5):
         metrics = evals.evaluate(logits, batch, threshold)
@@ -190,26 +201,6 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
-        
-
-    def subgraph_cls(self, final_embed, agg_edge):
-        ''' process node feature at graph-level for binary classification
-
-        :param x_pooled: pooled node features from DiffPool
-        :param edge_dict: aggregated edge features
-        '''
-        # Concatenate aggregated edge info with pooled node features
-        # x = torch.cat([x_pooled, edge_dict.view(-1, 1)], dim=-1)
-
-        # Concatenate pooled node features with aggregated edge features
-        x = torch.cat([final_embed, agg_edge.view(-1, 1)], dim=-1)  # Ensure edge features are 2D
-
-        # Pass the concatenated features through the classifier
-        logits = self.classifier(x)
-
-        # Apply sigmoid for binary classification
-        probs = torch.sigmoid(logits)
-        return probs
 
 
     def agg_edge_features(self, edge_attr_dict):
