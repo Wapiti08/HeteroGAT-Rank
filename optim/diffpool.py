@@ -89,6 +89,7 @@ def hetero_diff_pool(
 
     return pooled_x_dict, pooled_adj_dict, link_loss, ent_loss
 
+
 class HeteroGNN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
         '''
@@ -112,6 +113,7 @@ class HeteroGNN(torch.nn.Module):
             # learnable transformation of node embeddings
             self.pooling_layers[node_type] = nn.Linear(out_channels, out_channels)
 
+
     def forward(self, x_dict: dict, edge_index_dict:dict) -> dict:
         '''
         args:
@@ -130,8 +132,9 @@ class HeteroGNN(torch.nn.Module):
                     x = x.to(device)
                     edge_index = edge_index.to(device)
                     x = x.float()  # Ensures x is float32
-                    edge_index = edge_index.float()  # Ensures edge_index is int64
+                    # edge_index = edge_index.float()  # Ensures edge_index is int64
                     print(x.shape, edge_index.shape)
+
                     node_features = self.node_type_encoders[node_type](x, edge_index)
 
                     # compute the assignment matrix for each node type (using softmax)
@@ -144,117 +147,3 @@ class HeteroGNN(torch.nn.Module):
             s_dict[node_type] = s
         
         return s_dict
-
-
-
-# class HeteroDiffPool(torch.nn.Module):
-#     ''' use two GNNs to pool the heterogenous graph
-    
-#     '''
-#     def __init__(self, node_types, edge_types, num_features, num_classes, max_nodes=150):
-#         super(HeteroDiffPool, self).__init__()
-
-#         # initialize the pooling and embedding networks for per node type
-#         self.gnns = torch.nn.ModuleDict()
-
-#         for node_type in node_types:
-#             for (src_node_type, edge_type, tgt_node_type) in edge_types:
-#                 if node_type == src_node_type:
-#                     self.gnns[f'{node_type}_{edge_type}'] = torch.nn.ModuleDict(
-#                         {
-#                         "gnn_pool": HeteroGNN(num_features, 64, max_nodes),
-#                         "gnn_embed": HeteroGNN(num_features, 64, 64)
-#                     })
-
-#         # for binary classification, output layer is 2
-#         self.lin1 = torch.nn.Linear(3 * 64 , 64)
-#         # num_classes is 2 for binary classification
-#         self.lin2 = torch.nn.Linear(64, num_classes) 
-
-
-#     def forward(self, x_dict, edge_index_dict, mask_dict=None):
-#         '''
-#         args:
-#             x_dict: dict of node types and their features
-#             edge_index_dict: dict of edge types and their indices
-#             mask_dict: dict where keys are node types, values are masks for nodes
-        
-#         return:
-#             predicted probabilities for binary classification 
-#         '''
-
-
-#         # add blank node feature for Package_Name
-#         if "Package_Name" not in x_dict:
-#             x_dict["Package_Name"] = torch.zeros((1, x_dict["Path"].size(1)), device=x_dict["Path"].device)
-
-#         # score dict and embed dict
-#         s_dict, x_dict_embed = {}, {}
-#         # Initialize embed dict for all node types
-#         for node_type in x_dict.keys():
-#             x_dict_embed[node_type] = []
-
-#         for node_type in x_dict.keys():
-#             for edge_index in edge_index_dict.keys():
-#                 (src_node_type, edge_type, tgt_node_type) = edge_index
-#                 # Make sure we're processing edges of the correct node type
-#                 if node_type == src_node_type:
-#                     # get the GNN for the current node and edge type
-#                     gnn_pool = self.gnns[f'{node_type}_{edge_type}']["gnn_pool"]
-#                     gnn_embed = self.gnns[f'{node_type}_{edge_type}']["gnn_embed"]
-
-#                     if mask_dict is None:
-#                         # apply the pooling GNN
-#                         print(edge_index_dict[edge_index])
-#                         if edge_index_dict[edge_index].size(0) == 0:
-#                             print(f"Skipping zero-value edge_index for {node_type} -> {tgt_node_type}")
-#                             continue
-
-#                         s_dict[node_type] = gnn_pool(x_dict[node_type], edge_index_dict[edge_index])
-#                         # apply the embedding GNN
-#                         x_dict_embed[node_type] = gnn_embed(x_dict[node_type], edge_index_dict[edge_index])
-
-#                     else:
-#                         if edge_index_dict[edge_index].size(0) == 0:
-#                             print(f"Skipping zero-value edge_index for {node_type} -> {tgt_node_type}")
-#                             continue
-#                         # apply the pooling GNN
-#                         s_dict[node_type] = gnn_pool(x_dict[node_type], edge_index_dict[edge_index], mask_dict[node_type])
-#                         # apply the embedding GNN
-#                         x_dict_embed[node_type] = gnn_embed(x_dict[node_type], edge_index_dict[edge_index], mask_dict[node_type])
-
-#         # concatenate the scores and embeddings
-#         x_all = []
-#         adj_all = []
-
-#         for node_type in x_dict.keys():
-#             for edge_index in edge_index_dict.keys():
-#                 (src_node_type, edge_type, tgt_node_type) = edge_index
-#                 if node_type == src_node_type:
-#                     # get the scores and embeddings for the current node and edge type
-#                     edge_in = edge_index_dict.get(edge_index)
-#                     # Check if the edge_index contains only zeros
-#                     if torch.all(edge_in == 0):
-#                         print(f"Skipping zero-value edge_index for {src_node_type} -> {tgt_node_type}")
-#                         continue  # Skip processing this edge type
-#                     if mask_dict is None:
-#                         # Perform dense pooling only for non-zero edge_index tensors
-#                         x, adj, l1, e1 = hetero_diff_pool(x_dict_embed[node_type], edge_in, s_dict[node_type])
-#                     else:
-#                         # Perform dense pooling only for non-zero edge_index tensors
-#                         x, adj, l1, e1 = hetero_diff_pool(x_dict_embed[node_type], edge_in,
-#                                                         s_dict[node_type], mask_dict.get(node_type))
-                    
-#                     x_all.append(x)
-#                     adj_all.append(adj)
-
-#         # concatenate the pooled features and adjacency matrices
-#         x_all = torch.cat(x_all, dim=-1)
-#         # average over the subgraph
-#         x_all = x_all.mean(dim=1)
-
-#         # classification
-#         x = self.lin1(x_all).relu()
-#         x = self.lin2(x)
-
-#         return F.log_softmax(x, dim=-1)

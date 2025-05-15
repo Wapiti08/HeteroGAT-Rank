@@ -24,13 +24,6 @@ device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 
-def custom_collate_fn(batch):
-    ''' align with node numbers in every batch
-    
-    '''
-    
-
-
 if __name__ == "__main__":
 
     data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
@@ -130,10 +123,13 @@ if __name__ == "__main__":
     print("Training MaskedHeteroGAT ...")
     batch = next(iter(train_loader))
 
+    print("in_channels: ", list(batch.num_node_features.values())[0])
+
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
+        # default is 400
         in_channels= list(batch.num_node_features.values())[0],
-        hidden_channels=64, 
+        hidden_channels=256, 
         out_channels=64, 
         num_heads=4, 
     ).to(device)

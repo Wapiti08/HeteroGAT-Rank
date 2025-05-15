@@ -39,8 +39,17 @@ class MaskedHeteroGAT(torch.nn.Module):
     
         # GAT layers
         self.conv1 = HeteroConv(
-            {et: GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
-                         add_self_loops=False)
+            {et: 
+            #  GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
+            #              add_self_loops=False)
+             GATv2Conv(
+                in_channels=(400, 400),  
+                out_channels=64,  
+                heads=num_heads,  
+                concat=True,  
+                negative_slope=0.2,
+                add_self_loops=False
+            )
              for et in self.edge_types},
               # aggregation method for multi-head attention
             aggr='mean',
@@ -98,8 +107,36 @@ class MaskedHeteroGAT(torch.nn.Module):
             edge_index = edge_index_dict[edge_type]
             # Move the edge index tensor to the same device
             edge_index = edge_index.to(torch.long).to(device)
+            # Ensure edge_index is coalesced
+            if edge_index.is_sparse:
+                edge_index = edge_index.coalesce()  # Coalesce to remove duplicates
 
+            # Transpose edge_index to ensure it has the shape [2, num_edges]
+            if edge_index.shape[0] != 2:
+                edge_index = edge_index.T  # Transpose to get shape [2, num_edges]
+
+            # Check the unique nodes in edge_index and ensure they are within bounds of x_src and x_tgt
+            if edge_index.is_sparse:
+                dense_edge_index = edge_index.to_dense()  # Convert to dense tensor
+                unique_nodes = torch.unique(dense_edge_index)  # Find unique nodes
+                print(f"Unique nodes in edge_index: {unique_nodes}")
+            print(f"Total number of nodes in x_src: {x_src.shape[0]}")
+            print(f"Total number of nodes in x_tgt: {x_tgt.shape[0]}")
+
+            # Ensure that x_src and x_tgt are coalesced if sparse
+            x_src = x_src.coalesce() if x_src.is_sparse else x_src
+            x_tgt = x_tgt.coalesce() if x_tgt.is_sparse else x_tgt
+
+            # Ensure that the edge_index shape is correct and that the node features are consistent with the edges
+            print(f"Edge index shape before conv: {edge_index.shape}")
+            print(f"x_src shape: {x_src.shape}, dtype: {x_src.dtype}")
+            print(f"x_tgt shape: {x_tgt.shape}, dtype: {x_tgt.dtype}")
+
+            # Call the convolution after ensuring all tensors are coalesced
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+
+
+
             attn_weights[edge_type] = alpha
 
             out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
@@ -114,48 +151,9 @@ class MaskedHeteroGAT(torch.nn.Module):
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
         # create the mapping from global indices to local indices
-        global_to_local_mapping = global_to_local_map(x_dict, edge_index_dict)
-
-        # Process each edge type and sanitize edge indices
-        for edge_type, edge_index in edge_index_dict.items():
-            src_type, _, tgt_type = edge_type
-            num_src_nodes = x_dict[src_type].size(0)  # Local node count for source type
-            num_tgt_nodes = x_dict[tgt_type].size(0)  # Local node count for target type
-
-            # Debug: Print the number of nodes for this edge type
-            print(f"Sanitizing edge type {edge_type}: num_src_nodes = {num_src_nodes}, num_tgt_nodes = {num_tgt_nodes}")
-
-            # Fix unmatched size and index for the current edge type
-            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes, global_to_local_mapping)
-    
-        # ---- check for missing node/edge types
-        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
-        x_dict = miss_check(x_dict, node_types, hidden_dim)
-        edge_index_dict = self.miss_edge_index(edge_index_dict)
-
-
         # ---- first conv with attention
         x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
-
-        # ---- check for missing node/edge types before conv2
-        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
-        x_dict = miss_check(x_dict, node_types, hidden_dim)
-        edge_index_dict = self.miss_edge_index(edge_index_dict)
-
-        # Process each edge type and sanitize edge indices
-        for edge_type, edge_index in edge_index_dict.items():
-            src_type, _, tgt_type = edge_type
-            num_src_nodes = x_dict[src_type].size(0)  # Local node count for source type
-            num_tgt_nodes = x_dict[tgt_type].size(0)  # Local node count for target type
-
-            # Debug: Print the number of nodes for this edge type
-            print(f"Sanitizing edge type {edge_type}: num_src_nodes = {num_src_nodes}, num_tgt_nodes = {num_tgt_nodes}")
-
-            # Fix unmatched size and index for the current edge type
-            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes, global_to_local_mapping)
-
-        # x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
         # ---- diffpool per node type, excluding "Package_Name"
         s_dict = self.hetero_gnn(x_dict, edge_index_dict)
@@ -163,6 +161,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         pooled_x_dict, pooled_adj_dict, link_loss, ent_loss = diffpool.hetero_diff_pool(
                     x_dict, edge_index_dict, s_dict
                 )
+        
         # last attention weight calculation after pooling
         x_dict_pooled, attn_weights_pooled = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
 
