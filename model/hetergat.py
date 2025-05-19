@@ -3,12 +3,15 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
+from utils import sparsepad
 from torch_geometric.nn import HeteroConv, GATConv,global_mean_pool
 from torch import nn
 import torch.nn.functional as F
 import os
 from utils import evals
 from utils.pregraph import *
+from collections import defaultdict
+import pandas as pd
 
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
@@ -16,9 +19,9 @@ node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-class HeteroGAT(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels, num_heads):
-        super(HeteroGAT, self).__init__()
+class HeterGAT(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, num_heads, edge_attr_dim):
+        super(HeterGAT, self).__init__()
 
         self.edge_types = [
             ('Package_Name', 'Action', 'Path'),
@@ -26,19 +29,19 @@ class HeteroGAT(torch.nn.Module):
             ('Package_Name', 'CMD', 'Command'),
             ('Package_Name', 'Socket', 'IP'),
             ('Package_Name', 'Socket', 'Port'),
-            ('Package_Name', 'Socket', 'Hostnames'),
+            # ('Package_Name', 'Socket', 'Hostnames'),
         ]
 
         self.conv1 = HeteroConv(
             {et: GATConv((-1, -1), hidden_channels, heads=num_heads,
-                         add_self_loops=False)
+                         add_self_loops=False, edge_dim = edge_attr_dim)
              for et in self.edge_types},
             aggr='mean',
         )
 
         self.conv2 = HeteroConv(
             {et: GATConv((-1, -1), hidden_channels, heads=num_heads,
-                         add_self_loops=False)
+                            add_self_loops=False, edge_dim = edge_attr_dim)
              for et in self.edge_types},
             aggr='mean',
         )
@@ -46,20 +49,12 @@ class HeteroGAT(torch.nn.Module):
         # Binary cross-entropy loss with optional class weighting
         self.loss_fn = nn.BCEWithLogitsLoss()
 
-        # assumes pooling from all non-package node types - Package_Name is always the src node
-        # self.classifier = nn.Linear(len(set(t for _, _, t in self.edge_types)) * hidden_channels * num_heads, 1)
+        node_id_map_file = Path(self.processed_dir).parent.joinpath('global_node_id_map.pkl')
 
-
-    def miss_edge_index(self, edge_index_dict):
-        for edge_type in self.edge_types:
-            if edge_type not in edge_index_dict:
-                edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, \
-                                    device=next(self.parameters()).device)
-        
-        return edge_index_dict
+        self.global_node_id_map = load_global_node_id_map(node_id_map_file)
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
-        ''' custom version of HeteroGonv that returns attention weights
+        ''' custom version of HeteroGonv that returns attention weights for bipartite graph
         
         returns:
             - updated x_dict
@@ -68,18 +63,53 @@ class HeteroGAT(torch.nn.Module):
         attn_weights = {}
         out_dict = {}
 
+        ori_x_dict = x_dict.copy()
+
+        # Create a dictionary to store the mapping between nodes and attention scores
+        edge_atten_map = {}
+
         for edge_type, conv in conv_module.convs.items():
             src_type, _, tgt_type = edge_type
-            x_src = x_dict[src_type]
+            # ensure src_type is "Package_Name"
+            if src_type == 'Package_Name':
+                if src_type not in x_dict:
+                    print(f"Warning: {src_type} not in x_dict, skipping this edge type.")
+                    continue  # If Package_Name is missing, skip this edge type
+                x_src = x_dict[src_type]
+
+            # Ensure that tgt_type exists in x_dict
+            if tgt_type not in x_dict:
+                print(f"Warning: {tgt_type} not in x_dict, skipping this edge type.")
+                continue  # Skip if the target type is missing
+
             x_tgt = x_dict[tgt_type]
             edge_index = edge_index_dict[edge_type]
 
-            out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
-            attn_weights[edge_type] = alpha
+            if edge_index.is_sparse:
+                edge_index = edge_index.coalesce().indices()
 
+            out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+
+            # reverse lookup of global node indices to original node values
+            for i in range(edge_index.shape[1]):
+                src_node_idx = edge_index[0, i].item()
+                tgt_node_idx = edge_index[1, i].item()
+
+                # retrieve the original node values using reverse lookup
+                src_node_value = get_ori_node_value(src_node_idx, self.global_node_id_map)
+                tgt_node_value = get_ori_node_value(tgt_node_idx, self.global_node_id_map)
+                # Store the edge, original node values, and the attention score in the map
+                edge_atten_map[(src_node_value, tgt_node_value)] = alpha[0, i].item()
+
+            attn_weights[edge_type] = alpha
             out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
         
-        return out_dict, attn_weights
+        # After the first pass, merge the updated features with the original ones for all node types
+        for node_type in ori_x_dict:
+            if node_type not in out_dict:
+                out_dict[node_type] = ori_x_dict[node_type]
+
+        return out_dict, attn_weights, edge_atten_map
 
 
     def forward(self, batch, **kwargs):
@@ -89,52 +119,22 @@ class HeteroGAT(torch.nn.Module):
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
 
-        # sanitize edge indices before first conv
-        for edge_type, edge_index in edge_index_dict.items():
-            src_type, _, tgt_type = edge_type
-
-            num_src = x_dict[src_type].size(0)
-            num_tgt = x_dict[tgt_type].size(0)
-            # fix unmatched size and index for node
-            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src, num_tgt)
-
-        # ---- check for missing node/edge types before conv1
-        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
-
-        # check potential miss node types
-        x_dict = miss_check(x_dict, node_types, hidden_dim)
-        edge_index_dict = self.miss_edge_index(edge_index_dict)
-
         # ---- first conv with attention
-        x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        x_dict_1, attn_weights_1, edge_atten_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        
         x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
-
-        # ---- check for missing node/edge types before conv2
-        hidden_dim = next(x.shape[1] for x in x_dict.values() if x is not None and x.dim() == 2)
-        # check potential miss node types
-        x_dict = miss_check(x_dict, node_types, hidden_dim)
-        edge_index_dict = self.miss_edge_index(edge_index_dict)
-         
-        # sanitize edge indices before second conv
-        for edge_type, edge_index in edge_index_dict.items():
-            src_type, _, tgt_type = edge_type
-
-            num_src = x_dict[src_type].size(0)
-            num_tgt = x_dict[tgt_type].size(0)
-            # fix unmatched size and index for node
-            edge_index_dict[edge_type] = sani_edge_index(edge_index, num_src, num_tgt)
-
         # ---- second conv with attention
-        x_dict, attn_weights_2 = self.cal_attn_weight(self.conv2,x_dict, edge_index_dict)
+
+        x_dict, attn_weights_2, edge_atten_map_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
         # ---- pooling per node type, excluding "Package_Name"
         pooled_outputs = []
+
         for node_type, x in x_dict.items():
-            if node_type == "Package_Name":
-                continue
-            if hasattr(batch[node_type], "batch"):
-                pooled = global_mean_pool(x, batch[node_type].batch)
-                pooled_outputs.append(pooled)
+            # global_mean_pool does not support sparse tensors
+            x = x.to_dense()
+            pooled = global_mean_pool(x, torch.zeros(x.size(0), dtype=torch.long).to(x.device))
+            pooled_outputs.append(pooled)
 
         # ---- final classification
         graph_embed = torch.cat(pooled_outputs, dim=-1)
@@ -143,7 +143,7 @@ class HeteroGAT(torch.nn.Module):
         # dynamically infer classifier input size
         logits = nn.Linear(in_channels, 1).to(graph_embed.device)(graph_embed).squeeze(-1)
 
-        return logits, {"conv1": attn_weights_1, "conv2": attn_weights_2}
+        return logits, {"conv1": attn_weights_1, "conv2": attn_weights_2}, {'conv1': edge_atten_map_1, "conv2": edge_atten_map_2}
     
     
     def compute_loss(self, logits, batch):
@@ -156,13 +156,13 @@ class HeteroGAT(torch.nn.Module):
         '''
         y_true = batch['label'].float()
         assert logits.shape == y_true.shape, f"Shape mismatch: {logits.shape} vs {y_true.shape}"
+        
         return self.loss_fn(logits, y_true)
 
     def evaluate(self, logits, batch, threshold=0.5):
         metrics = evals.evaluate(logits, batch, threshold)
         print("evaluation result: \n", metrics )
         return metrics
-    
 
     def plot_metrics(self, y_true, y_prob, metrics):
         ''' plot roc and calculated metrics
@@ -174,4 +174,80 @@ class HeteroGAT(torch.nn.Module):
 
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
+    
+
+
+    def rank_edges(self, attn_weights, k:int, noise_factor:float):
+        ''' rank the edges based on the attention weights
+        '''
+        top_k_edges = {}
+        for edge_type, weights in attn_weights.items():
+            # weights is a tensor of shape (num_edges, num_heads)
+
+            # Compute the mean (or max, sum, etc.) attention weight for each edge across all heads
+            mean_weights = weights.mean(dim=1) # shape: [num_edges]
+
+            # add random noise to break ties in case of identical attention weights
+            if noise_factor:
+                noise = torch.randn(mean_weights) * noise_factor
+                mean_weights = mean_weights + noise
+            # sort the edges by their mean attention weight
+            sorted_indices = torch.argsort(mean_weights, descending=True)
+
+            # select the top k edges 
+            top_k_edge_indices = sorted_indices[:k]
+
+            # get the corresponding edge
+            top_k_edge_for_type = top_k_edge_indices.tolist()
+
+            # add the selected top k edges for the current edge type
+            top_k_edges.extend(top_k_edge_for_type)
+
+        return top_k_edges
+    
+
+    def rank_nodes_by_eco_system(self, edge_atten_map, node_json:list, k):
+        ''' Rank target nodes (tgt_node_value) by eco_system consideration
         
+        '''
+        # Create a dictionary to store attention scores by eco_system and tgt_node_value
+        eco_system_rank_map = defaultdict(lambda: defaultdict(float))
+
+        df = pd.DataFrame(node_json)
+
+        # aggregate attention weights for each node based on its adjacent edges
+        for (src_node_value, tgt_node_value), attn_weight in edge_atten_map.items():
+            # Find the eco_system for this node type in the DataFrame
+            src_node_eco = df[df['value'] == src_node_value]['eco'].values
+            if len(src_node_eco) == 0:
+                continue  # Skip if eco_system for source node is not found
+            src_node_eco = src_node_eco[0]  # Assuming the eco_system is unique for each node
+
+            # Aggregate attention score by eco_system for tgt_node_value
+            eco_system_rank_map[src_node_eco][tgt_node_value] += attn_weight
+
+        # Sort and get top k nodes per eco_system
+        top_k_by_eco_system = {}
+        for eco_system, tgt_nodes in eco_system_rank_map.items():
+            sorted_tgt_nodes = sorted(tgt_nodes.items(), key=lambda x: x[1], reverse=True)
+            top_k_by_eco_system[eco_system] = [node for node, score in sorted_tgt_nodes[:k]]
+
+        return top_k_by_eco_system
+
+    def rank_nodes_global(self, edge_atten_map, k):
+        ''' Rank target nodes (tgt_node_value) without considering eco_system '''
+
+        # Create a dictionary to store aggregated attention scores for each target node
+        tgt_node_rank_map = defaultdict(float)
+
+        # Iterate over edge_attention_map to aggregate attention weights for each tgt_node_value
+        for (src_node_value, tgt_node_value), attn_weight in edge_atten_map.items():
+            tgt_node_rank_map[tgt_node_value] += attn_weight
+        
+        # Sort the target nodes by their aggregated attention scores
+        sorted_tgt_nodes = sorted(tgt_node_rank_map.items(), key=lambda x: x[1], reverse=True)
+        
+        # Get the top k target nodes globally
+        top_k_global_nodes = [node for node, score in sorted_tgt_nodes[:k]]
+
+        return top_k_global_nodes

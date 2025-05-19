@@ -22,6 +22,7 @@ from torch_geometric.data import HeteroData
 import torch
 from utils import prostring
 from ext import fea_encoder
+import pickle
 
 
 str_node_list = ['Package_Name','Path','DNS Host', 'Command', "IP", "Hostnames", "Sockets"]
@@ -54,6 +55,51 @@ def get_or_add_node(node, global_node_id_map, global_node_counter):
     return node_idx, global_node_id_map, global_node_counter
 
 
+# def load_embeds_and_maps(node_embed, node_id_mapping):
+#     ''' load the embeddings and node ID mappings if they exist
+#     otherwise, create new files if they don't exist
+#     '''
+#     file_prefix = "graph_data"
+
+#     embed_file = Path(f"{file_prefix}_embeds.pt")
+#     map_file = Path(f"{file_prefix}_mappings.pkl")
+
+#     if embed_file.exists() and map_file.exists():
+#         node_embed = torch.load(embed_file)
+#         print(f"Loaded node embeddings from {embed_file}")
+
+#         # load existing mappings
+#         with open(map_file, 'rb') as f:
+#             node_id_mapping = pickle.load(f)
+#         print("Loaded existing embeddings and mappings")
+    
+#     else:
+#         # if files do not exist, initialize them as empty
+#         node_embed = {}
+#         map_id_mapping = {}
+    
+#     return node_embed, map_id_mapping
+
+
+# def save_embeds_and_maps(node_embedding, node_id_mapping):
+#     ''' save the embeddings and node ID mappings to disk
+    
+#     '''
+#     file_prefix = "graph_data"
+
+#     embed_file = Path(f"{file_prefix}_embeds.pt")
+#     map_file = Path(f"{file_prefix}_mappings.pkl")
+
+#     # save embeddings as a tensor
+#     torch.save(node_embedding, embed_file)
+
+#     # save the node ID mappings as a pickle file
+#     with open(map_file, 'wb') as f:
+#         pickle.dump(node_id_mapping, f)
+    
+#     print(f"Embeddings and mappings saved to {embed_file} and {map_file}")
+
+
 def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
     data = HeteroData()
@@ -75,6 +121,7 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
         if node_type in long_str_node_list:
             node_value = prostring.process_string(node_value)
         
+
         # check the global unique id
         if node_value not in global_node_id_map:
             global_node_id_map[node_value] = global_node_counter
@@ -84,9 +131,10 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
         # encode node value based on matched types
         if node_type in str_node_list:
-            node_features = seq_encoder(node_value)
+            node_features, ori_index = seq_encoder(node_value)
         elif node_type in cate_node_list:
-            node_features = seq_encoder(node_value)
+            node_features, ori_index = seq_encoder(node_value)
+
         # default use categorical encoder for eco
         eco_feature = cate_encoder(node_eco)
         

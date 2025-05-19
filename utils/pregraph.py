@@ -5,6 +5,8 @@ sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 from torch_geometric.data import HeteroData
 import os
+import pickle
+
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
@@ -37,6 +39,20 @@ def miss_check(x_dict, node_types, hidden_dim):
             x_dict[node_type] = torch.zeros((1, hidden_dim), device=device)
 
     return x_dict
+
+
+def load_global_node_id_map(map_file_path):
+    ''' load the global node ID mapping from a file '''
+    if Path(map_file_path).exists():
+        with open(map_file_path, 'rb') as f:
+            global_node_id_map = pickle.load(f)
+        return global_node_id_map
+    else:
+        return None
+
+
+def get_ori_node_value(global_node_id, global_node_id_map):
+    return global_node_id_map.get(global_node_id, None)
 
 
 def global_to_local_map(x_dict, edge_index_dict):

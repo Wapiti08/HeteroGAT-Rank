@@ -14,7 +14,7 @@ from datetime import datetime
 import os
 from sklearn.model_selection import train_test_split
 from utils import evals
-from model.hetergat import HeteroGAT
+from model.hetergat import HeterGAT
 from model.mhetergat import MaskedHeteroGAT
 from torch_geometric.utils import to_dense_batch
 
@@ -55,70 +55,80 @@ if __name__ == "__main__":
     )
 
 
-    # model2 = HeteroGAT(
-    #     hidden_channels=64,
-    #     out_channels=256,
-    #     num_heads=4
-    # ).to(device)
+    model2 = HeterGAT(
+        hidden_channels=64,
+        out_channels=256,
+        num_heads=4,
+        # based on pre-set dimension
+        edge_attr_dim=16
+    ).to(device)
 
-    # optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
 
-    # print("Training HeteroGAT ...")
+    print("Training HeteroGAT ...")
 
-    # conv_weight_dict_2 = {}
-    # # define the starting time
-    # start_time = datetime.now()
-    # for epoch in range(num_epochs):
-    #     model2.train()
-    #     total_loss = 0
+    conv_weight_dict_2 = {}
+    # define the starting time
+    start_time = datetime.now()
+    for epoch in range(num_epochs):
+        model2.train()
+        total_loss = 0
 
-    #     for batch in train_loader:
-    #         batch = batch.to(next(model2.parameters()).device)  # Move batch to the same device as model
-    #         optimizer2.zero_grad()
+        for batch in train_loader:
+            batch = batch.to(next(model2.parameters()).device)  # Move batch to the same device as model
+            optimizer2.zero_grad()
 
-    #         # forward pass
-    #         logits, conv_weight_dict_2 = model2.forward(batch)
-    #         # compute loss
-    #         loss = model2.compute_loss(logits, batch)
-    #         # backward pass and optimization
-    #         loss.backward()
-    #         optimizer2.step()
+            # forward pass
+            logits, conv_weight_dict_2 = model2.forward(batch)
+            
+            # compute loss
+            loss = model2.compute_loss(logits, batch)
+            # backward pass and optimization
+            loss.backward()
+            optimizer2.step()
 
-    #         total_loss += loss.item()
+            total_loss += loss.item()
         
-    #     avg_loss = total_loss/len(train_loader)
+        # rank last conv_weight_dict
+        model2.rank_edges()
 
-    #     # ----- EVALUATION -----
-    #     model2.eval()
-    #     all_logits = []
-    #     all_labels = []
+        avg_loss = total_loss/len(train_loader)
 
-    #     with torch.no_grad():
-    #         for batch in test_loader:
-    #             batch = batch.to(next(model2.parameters()).device)
-    #             logits, _ = model2(batch)
-    #             all_logits.append(logits)
-    #             all_labels.append(batch['label'])
-    #     # Concatenate
-    #     all_logits = torch.cat(all_logits)
-    #     all_labels = torch.cat(all_labels)
+        # ----- EVALUATION -----
+        model2.eval()
+        all_logits = []
+        all_labels = []
 
-    #     # Compute metrics
-    #     metrics = model2.evaluate(all_logits, all_labels)
+        with torch.no_grad():
+            for batch in test_loader:
+                batch = batch.to(next(model2.parameters()).device)
+                logits, _ = model2(batch)
+                all_logits.append(logits)
+                all_labels.append(batch['label'])
 
-    #     model2.plot_metrics(
-    #         all_labels,
-    #         torch.sigmoid(all_logits).cpu().numpy(),
-    #         metrics)
+        # Concatenate
+        all_logits = torch.cat(all_logits)
+        all_labels = torch.cat(all_labels)
 
-    #     print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
+        # Compute metrics
+        metrics = model2.evaluate(all_logits, all_labels)
+
+        model2.plot_metrics(
+            all_labels,
+            torch.sigmoid(all_logits).cpu().numpy(),
+            metrics)
+
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")
     
-    # time_spent = datetime.now() - start_time
-    # hours, remainder = divmod(time_spent.total_seconds(), 3600)
-    # minutes, seconds = divmod(remainder, 60)
-    # print(f"Time spent for HeteroGAT: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
+    time_spent = datetime.now() - start_time
+    hours, remainder = divmod(time_spent.total_seconds(), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print(f"Time spent for HeteroGAT: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
-    # torch.save(model2, "heterogat_model.pth")
+    torch.save(model2, "heterogat_model.pth")
+
+
+
 
     print("Training MaskedHeteroGAT ...")
     batch = next(iter(train_loader))

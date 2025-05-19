@@ -10,7 +10,8 @@ from utils import evals
 from utils.pregraph import *
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+# node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -34,7 +35,7 @@ class MaskedHeteroGAT(torch.nn.Module):
             ('Package_Name', 'CMD', 'Command'),
             ('Package_Name', 'Socket', 'IP'),
             ('Package_Name', 'Socket', 'Port'),
-            ('Package_Name', 'Socket', 'Hostnames'),
+            # ('Package_Name', 'Socket', 'Hostnames'),
         ]
     
         # GAT layers
@@ -81,7 +82,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         return edge_index_dict
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
-        ''' custom version of HeteroGonv that returns attention weights
+        ''' Custom version of HeteroGonv that returns attention weights
         
         returns:
             - updated x_dict
@@ -90,58 +91,42 @@ class MaskedHeteroGAT(torch.nn.Module):
         attn_weights = {}
         out_dict = {}
 
+        ori_x_dict = x_dict.copy()
+
         for edge_type, conv in conv_module.convs.items():
-            if edge_type not in edge_index_dict or edge_index_dict[edge_type] is None:
-                print(f"Warning: Missing edge type '{edge_type}' in edge_index_dict, skipping.")
-                continue  # Skip this edge type if the edge_index is None
-            
             src_type, _, tgt_type = edge_type
 
-            if src_type not in x_dict or tgt_type not in x_dict:
-                print(f"Warning: Missing node features for {src_type} or {tgt_type}. Skipping this edge type.")
-                continue  # Skip if node features are missing for source or target type
+            # ensure src_type is "Package_Name"
+            if src_type == 'Package_Name':
+                if src_type not in x_dict:
+                    print(f"Warning: {src_type} not in x_dict, skipping this edge type.")
+                    continue  # If Package_Name is missing, skip this edge type
+                x_src = x_dict[src_type]
         
-            x_src = x_dict[src_type].to(device)
-            x_tgt = x_dict[tgt_type].to(device)
+            # Ensure that tgt_type exists in x_dict
+            if tgt_type not in x_dict:
+                print(f"Warning: {tgt_type} not in x_dict, skipping this edge type.")
+                continue  # Skip if the target type is missing
 
+            x_tgt = x_dict[tgt_type]
             edge_index = edge_index_dict[edge_type]
-            # Move the edge index tensor to the same device
-            edge_index = edge_index.to(torch.long).to(device)
-            # Ensure edge_index is coalesced
+
             if edge_index.is_sparse:
-                edge_index = edge_index.coalesce()  # Coalesce to remove duplicates
+                edge_index = edge_index.coalesce().indices()
 
-            # Transpose edge_index to ensure it has the shape [2, num_edges]
-            if edge_index.shape[0] != 2:
-                edge_index = edge_index.T  # Transpose to get shape [2, num_edges]
-
-            # Check the unique nodes in edge_index and ensure they are within bounds of x_src and x_tgt
-            if edge_index.is_sparse:
-                dense_edge_index = edge_index.to_dense()  # Convert to dense tensor
-                unique_nodes = torch.unique(dense_edge_index)  # Find unique nodes
-                print(f"Unique nodes in edge_index: {unique_nodes}")
-            print(f"Total number of nodes in x_src: {x_src.shape[0]}")
-            print(f"Total number of nodes in x_tgt: {x_tgt.shape[0]}")
-
-            # Ensure that x_src and x_tgt are coalesced if sparse
-            x_src = x_src.coalesce() if x_src.is_sparse else x_src
-            x_tgt = x_tgt.coalesce() if x_tgt.is_sparse else x_tgt
-
-            # Ensure that the edge_index shape is correct and that the node features are consistent with the edges
-            print(f"Edge index shape before conv: {edge_index.shape}")
-            print(f"x_src shape: {x_src.shape}, dtype: {x_src.dtype}")
-            print(f"x_tgt shape: {x_tgt.shape}, dtype: {x_tgt.dtype}")
-
-            # Call the convolution after ensuring all tensors are coalesced
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
-
-
 
             attn_weights[edge_type] = alpha
 
             out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
         
+        # After the first pass, merge the updated features with the original ones for all node types
+        for node_type in ori_x_dict:
+            if node_type not in out_dict:
+                out_dict[node_type] = ori_x_dict[node_type]
+
         return out_dict, attn_weights
+
 
     def forward(self, batch, **kwargs):
         '''
@@ -153,6 +138,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         # create the mapping from global indices to local indices
         # ---- first conv with attention
         x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        
         x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
 
         # ---- diffpool per node type, excluding "Package_Name"
@@ -224,18 +210,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         norm_node_att = node_att / node_att.sum()
 
         return norm_node_att
-
-
-    # def ext_edge_att(self,):
-    #     ''' extract the importance of edges based on learned mask
-
-    #     '''
-    #     # normalize edge mask values
-    #     edge_att = self.edge_mask.detach().cpu()
-    #     norm_edge_att = edge_att / edge_att.sum()
-
-    #     return norm_edge_att
-
+    
     def rank_att(self, att_values):
         ''' rank importance of nodes / edges 
 

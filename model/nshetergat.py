@@ -16,7 +16,7 @@ from utils.pregraph import *
 from torch_geometric.sampler.neighbor_sampler import NeighborSampler
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -63,7 +63,6 @@ class NSHeteroGAT(torch.nn.Module):
 
         # define fixed number for edge selection
         self.fanout = fanout
-
 
         # Classifier for binary classification (output of size 1), consider extra input for edge info
         self.classifier = torch.nn.Linear(out_channels * num_heads, 1)
