@@ -17,19 +17,27 @@ from utils import evals
 from model.hetergat import HeterGAT
 from model.mhetergat import MaskedHeteroGAT
 from torch_geometric.utils import to_dense_batch
+import json
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 
 if __name__ == "__main__":
 
-    data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
+    # data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
+    data_path = Path.cwd().parent.joinpath("ext", "output_map", "processed")
     print("Creating iterative dataset")
     # return a batch of 10 subgraphs based on saved format
     dataset = IterSubGraphs(root=data_path, batch_size = 1)
+
+    node_json_file = Path.cwd().parent.joinpath("ext", "output", "nodes.json")
+
+    # load node json for node value matching
+    with node_json_file.open("r") as fr:
+        node_json = [json.loads(line) for line in fr]
 
     # load one .pt file at a time
     print("Creating subgraph dataloader")
@@ -54,13 +62,14 @@ if __name__ == "__main__":
         prefetch_factor=None
     )
 
-
     model2 = HeterGAT(
         hidden_channels=64,
-        out_channels=256,
+        # out_channels=256,
         num_heads=4,
         # based on pre-set dimension
-        edge_attr_dim=16
+        edge_attr_dim=16,
+        processed_dir=data_path
+
     ).to(device)
 
     optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001, weight_decay=1e-4)
@@ -79,8 +88,16 @@ if __name__ == "__main__":
             optimizer2.zero_grad()
 
             # forward pass
-            logits, conv_weight_dict_2 = model2.forward(batch)
+            logits, atten_weight_dict_2, edge_atten_map_2 = model2.forward(batch)
             
+            # print out top k edges
+            top_k_edges = model2.rank_edges(atten_weight_dict_2, 10, 1e-6)
+
+            # print out top k nodes
+            top_k_nodes_eco_system = model2.rank_nodes_by_eco_system(edge_atten_map_2, node_json, 10)
+
+            top_k_global_nodes = model2.rank_nodes_global(edge_atten_map_2, 10)
+
             # compute loss
             loss = model2.compute_loss(logits, batch)
             # backward pass and optimization
@@ -126,8 +143,6 @@ if __name__ == "__main__":
     print(f"Time spent for HeteroGAT: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
     torch.save(model2, "heterogat_model.pth")
-
-
 
 
     print("Training MaskedHeteroGAT ...")

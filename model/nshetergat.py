@@ -34,9 +34,8 @@ class NSHeteroGAT(torch.nn.Module):
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'Socket', 'IP'),
-            ('Package_Name', 'Socket', 'Port'),
-            ('Package_Name', 'Socket', 'Hostnames'),
+            ('Package_Name', 'socket', 'IP'),
+            ('Package_Name', 'socket', 'Port'),
         ]
     
         # GAT layers

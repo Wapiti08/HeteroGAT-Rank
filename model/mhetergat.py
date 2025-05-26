@@ -8,16 +8,16 @@ import torch.nn.functional as F
 import os
 from utils import evals
 from utils.pregraph import *
+from collections import defaultdict
 
 # predefined node types
-# node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 
 class MaskedHeteroGAT(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_heads):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, processed_dir):
         '''
         args:
             in_channels: the dimensionality of the input node features
@@ -33,9 +33,8 @@ class MaskedHeteroGAT(torch.nn.Module):
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'Socket', 'IP'),
-            ('Package_Name', 'Socket', 'Port'),
-            # ('Package_Name', 'Socket', 'Hostnames'),
+            ('Package_Name', 'socket', 'IP'),
+            ('Package_Name', 'socket', 'Port'),
         ]
     
         # GAT layers
@@ -58,8 +57,15 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         # define second layer
         self.conv2 = HeteroConv(
-            {et: GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
-                         add_self_loops=False)
+            {et: 
+             GATv2Conv(
+                in_channels=(400, 400),  
+                out_channels=64,  
+                heads=num_heads,  
+                concat=True,  
+                negative_slope=0.2,
+                add_self_loops=False
+            )
              for et in self.edge_types},
             aggr='mean',
         )
@@ -69,17 +75,18 @@ class MaskedHeteroGAT(torch.nn.Module):
             in_channels, hidden_channels, out_channels
             )
 
+        node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
+
+        self.global_node_id_map = load_global_node_id_map(node_id_map_file)
+
+        # for ranking purpose
+        self.global_edge_atten_map = defaultdict(float)
+        self.global_node_rank_map = defaultdict(float)
+        self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
+
         # Classifier for binary classification (output of size 1), consider extra input for edge info
         self.classifier = torch.nn.Linear(out_channels * num_heads, 1)
 
-
-    def miss_edge_index(self, edge_index_dict):
-        for edge_type in self.edge_types:
-            if edge_type not in edge_index_dict:
-                edge_index_dict[edge_type] = torch.empty((2, 0), dtype=torch.long, \
-                                    device=next(self.parameters()).device)
-        
-        return edge_index_dict
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
         ''' Custom version of HeteroGonv that returns attention weights
@@ -92,6 +99,12 @@ class MaskedHeteroGAT(torch.nn.Module):
         out_dict = {}
 
         ori_x_dict = x_dict.copy()
+
+        # Create a dictionary to store the mapping between nodes and attention scores
+        edge_atten_map = {}
+
+        # generate projection from global to local
+        g2l_map = global_to_local_map(x_dict, edge_index_dict)
 
         for edge_type, conv in conv_module.convs.items():
             src_type, _, tgt_type = edge_type
@@ -109,15 +122,34 @@ class MaskedHeteroGAT(torch.nn.Module):
                 continue  # Skip if the target type is missing
 
             x_tgt = x_dict[tgt_type]
+            x_src = x_dict[src_type]
             edge_index = edge_index_dict[edge_type]
 
             if edge_index.is_sparse:
                 edge_index = edge_index.coalesce().indices()
 
-            out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+            local_edge_index = remap_edge_indices(edge_index, g2l_map, src_type, tgt_type)
+
+
+            # shape of alpha is [num_edges, num_heads]
+            out, (_, alpha) = conv((x_src, x_tgt), local_edge_index, return_attention_weights=True)
+
+            assert local_edge_index.shape[1] == alpha.shape[0], \
+            f"Edge count mismatch: edge_index has {local_edge_index.shape[1]}, but alpha has {alpha.shape[0]}"
+
+            # reverse lookup of global node indices to original node values
+            for i in range(local_edge_index.shape[1]):
+                src_node_idx = edge_index[0, i].item()
+                tgt_node_idx = edge_index[1, i].item()
+
+                # retrieve the original node values using reverse lookup
+                src_node_value = get_ori_node_value(src_node_idx, self.global_node_id_map)
+                tgt_node_value = get_ori_node_value(tgt_node_idx, self.global_node_id_map)
+
+                # Store the edge, original node values, and the attention score in the map
+                edge_atten_map[(src_node_value, tgt_node_value)] = alpha[i, 0].item()
 
             attn_weights[edge_type] = alpha
-
             out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
         
         # After the first pass, merge the updated features with the original ones for all node types
@@ -125,7 +157,7 @@ class MaskedHeteroGAT(torch.nn.Module):
             if node_type not in out_dict:
                 out_dict[node_type] = ori_x_dict[node_type]
 
-        return out_dict, attn_weights
+        return out_dict, attn_weights, edge_atten_map
 
 
     def forward(self, batch, **kwargs):
@@ -137,7 +169,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
         # create the mapping from global indices to local indices
         # ---- first conv with attention
-        x_dict_1, attn_weights_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        x_dict_1, attn_weights_1, edge_atten_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
         x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
 
@@ -149,7 +181,7 @@ class MaskedHeteroGAT(torch.nn.Module):
                 )
         
         # last attention weight calculation after pooling
-        x_dict_pooled, attn_weights_pooled = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
+        x_dict_pooled, attn_weights_pooled, edge_atten_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
 
         # --- continue with binary classification task at subgraph-level
         ## do not choose x_dict_pooled because of it is not the final embeddings

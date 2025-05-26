@@ -10,7 +10,6 @@ all the edge types:
     Package_Name - CMD - Command
     Package_Name - Socket - IP
     Package_Name - Socket - Port
-    Package_Name - Socket - Hostnames
 
  '''
 
@@ -25,7 +24,7 @@ from ext import fea_encoder
 import pickle
 
 
-str_node_list = ['Package_Name','Path','DNS Host', 'Command', "IP", "Hostnames", "Sockets"]
+str_node_list = ['Package_Name','Path', 'DNS Host', 'Command', "IP", "Sockets"]
 long_str_node_list = ['Path', "Command"]
 cate_node_list = ['Action', "DNS"]
 
@@ -55,62 +54,8 @@ def get_or_add_node(node, global_node_id_map, global_node_counter):
     return node_idx, global_node_id_map, global_node_counter
 
 
-# def load_embeds_and_maps(node_embed, node_id_mapping):
-#     ''' load the embeddings and node ID mappings if they exist
-#     otherwise, create new files if they don't exist
-#     '''
-#     file_prefix = "graph_data"
-
-#     embed_file = Path(f"{file_prefix}_embeds.pt")
-#     map_file = Path(f"{file_prefix}_mappings.pkl")
-
-#     if embed_file.exists() and map_file.exists():
-#         node_embed = torch.load(embed_file)
-#         print(f"Loaded node embeddings from {embed_file}")
-
-#         # load existing mappings
-#         with open(map_file, 'rb') as f:
-#             node_id_mapping = pickle.load(f)
-#         print("Loaded existing embeddings and mappings")
+def nodes_process(nodes:list, global_node_id_map, global_node_counter, data: HeteroData):
     
-#     else:
-#         # if files do not exist, initialize them as empty
-#         node_embed = {}
-#         map_id_mapping = {}
-    
-#     return node_embed, map_id_mapping
-
-
-# def save_embeds_and_maps(node_embedding, node_id_mapping):
-#     ''' save the embeddings and node ID mappings to disk
-    
-#     '''
-#     file_prefix = "graph_data"
-
-#     embed_file = Path(f"{file_prefix}_embeds.pt")
-#     map_file = Path(f"{file_prefix}_mappings.pkl")
-
-#     # save embeddings as a tensor
-#     torch.save(node_embedding, embed_file)
-
-#     # save the node ID mappings as a pickle file
-#     with open(map_file, 'wb') as f:
-#         pickle.dump(node_id_mapping, f)
-    
-#     print(f"Embeddings and mappings saved to {embed_file} and {map_file}")
-
-
-def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
-
-    data = HeteroData()
-
-    nodes = subgraph['nodes']
-    edges = subgraph['edges']
-    label = subgraph['label']
-    
-    # Add the label as a graph-level attribute
-    data['label'] = torch.tensor([label], dtype=torch.long)
-
     # process nodes
     node_indices = []
     for idx, node in enumerate(nodes):
@@ -121,7 +66,6 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
         if node_type in long_str_node_list:
             node_value = prostring.process_string(node_value)
         
-
         # check the global unique id
         if node_value not in global_node_id_map:
             global_node_id_map[node_value] = global_node_counter
@@ -131,9 +75,9 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
         # encode node value based on matched types
         if node_type in str_node_list:
-            node_features, ori_index = seq_encoder(node_value)
+            node_features = seq_encoder(node_value)
         elif node_type in cate_node_list:
-            node_features, ori_index = seq_encoder(node_value)
+            node_features = seq_encoder(node_value)
 
         # default use categorical encoder for eco
         eco_feature = cate_encoder(node_eco)
@@ -153,91 +97,117 @@ def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
     for node_type in data.node_types:
         data[node_type].num_nodes = data[node_type].x.size(0)
 
-    # process edges (aligning edge indices with global node IDs)
-    edge_tuples = []
+    return data, global_node_id_map, global_node_counter
+
+
+def edges_process(edges:list, global_node_id_map, global_node_counter, data: HeteroData):
+    # initialize the edge_index for individual edge_type
+    edge_type_dict = {
+    ('Package_Name', 'DNS', 'DNS Host'): [],
+    ('Package_Name', 'Action', 'Path'): [],
+    ('Package_Name', 'CMD', 'Command'): [],
+    ('Package_Name', 'socket', 'IP'): [],
+    ('Package_Name', 'socket', 'Port'): []
+    }
+
     for edge in edges:
-        # Use get_or_add_node to handle source and target nodes
         source_idx, global_node_id_map, global_node_counter = \
             get_or_add_node(edge['source'], global_node_id_map, global_node_counter)
         target_idx, global_node_id_map, global_node_counter = \
             get_or_add_node(edge['target'], global_node_id_map, global_node_counter)
 
-        edge_tuples.append((source_idx, target_idx))
-        # transpose the lsit of tuples into a tensor of shape [2, num_edges]
-        edge_index = torch.tensor(edge_tuples, dtype=torch.long, device=device).t().contiguous()
-
-        # add edge attribute (one-hot encoding for edge "value")
-        edge_value = edge['value']
-        edge_attr = cate_encoder(edge_value)
-
         edge_type = edge['type']
 
-        # add edges to the corresponding relationship in HeteroData
         if edge_type == "Action":
-            if 'Action' not in data.edge_types:
-                data["Package_Name", "Action", "Path"].edge_index = edge_index
-                data["Package_Name", "Action", "Path"].edge_attr = edge_attr
-            else:
-                data['Package_Name', 'Action', 'Path'].edge_index = \
-                        torch.cat((data['Package_Name', 'Action', 'Path'].edge_index, edge_index), dim=1)
-                data['Package_Name', 'Action', 'Path'].edge_attr = \
-                        torch.cat((data['Package_Name', 'Action', 'Path'].edge_attr, edge_attr), dim=0)
-        
+            edge_type_dict[('Package_Name', 'Action', 'Path')].append((source_idx, target_idx))
         elif edge_type == 'DNS':
-            if 'DNS' not in data.edge_types:
-                data['Package_Name', 'DNS', 'DNS Host'].edge_index = edge_index
-                data['Package_Name', 'DNS', 'DNS Host'].edge_attr = edge_attr
-            else:
-                data['Package_Name', 'DNS', 'DNS Host'].edge_index = \
-                    torch.cat((data['Package_Name', 'DNS', 'DNS Host'].edge_index, edge_index), dim=1)
-                data['Package_Name', 'DNS', 'DNS Host'].edge_attr = \
-                    torch.cat((data['Package_Name', 'DNS', 'DNS Host'].edge_attr, edge_attr), dim=0)
-
+            edge_type_dict[('Package_Name', 'DNS', 'DNS Host')].append((source_idx, target_idx))
         elif edge_type == 'CMD':
-            if 'CMD' not in data.edge_types:
-                data['Package_Name', 'CMD', 'Command'].edge_index = edge_index
-                data['Package_Name', 'CMD', 'Command'].edge_attr = edge_attr
-            else:
-                data['Package_Name', 'CMD', 'Command'].edge_index = \
-                    torch.cat((data['Package_Name', 'CMD', 'Command'].edge_index, edge_index), dim=1)
-                data['Package_Name', 'CMD', 'Command'].edge_attr = \
-                    torch.cat((data['Package_Name', 'CMD', 'Command'].edge_attr, edge_attr), dim=0)
+            edge_type_dict[('Package_Name', 'CMD', 'Command')].append((source_idx, target_idx))
+        elif edge_type == 'Socket' and edge['target'] == 'IP':
+            edge_type_dict[('Package_Name', 'socket', 'IP')].append((source_idx, target_idx))
+        elif edge_type == 'Socket' and edge['target'] == 'Port':
+            edge_type_dict[('Package_Name', 'socket', 'Port')].append((source_idx, target_idx))
 
-        elif edge_type == 'Socket':
-            # Handle multiple Socket edge types (Socket - IP, Socket - Port, Socket - Hostnames)
-            if edge['target'] in ['IP']:
-                if 'Socket' not in data.edge_types:
-                    data['Package_Name', 'Socket', 'IP'].edge_index = edge_index
-                    data['Package_Name', 'Socket', 'IP'].edge_attr = edge_attr
+    for edge_type, edge_tuples in edge_type_dict.items():
+        if edge_tuples:
+            edge_index = torch.tensor(edge_tuples, dtype=torch.long, device=device).t().contiguous()
+            
+            # get attribute of edge
+            edge_value = edge['value']
+            edge_attr = cate_encoder(edge_value)
+
+            # process according to edge_type
+            if edge_type == ('Package_Name', 'Action', 'Path'):
+                if ('Package_Name', 'Action', 'Path') not in data.edge_types:
+                    data["Package_Name", "Action", "Path"].edge_index = edge_index
+                    data["Package_Name", "Action", "Path"].edge_attr = edge_attr
                 else:
-                    data['Package_Name', 'Socket', 'IP'].edge_index = \
-                        torch.cat((data['Package_Name', 'Socket', 'IP'].edge_index, edge_index), dim=1)
-                    data['Package_Name', 'Socket', 'IP'].edge_attr = \
-                        torch.cat((data['Package_Name', 'Socket', 'IP'].edge_attr, edge_attr), dim=0)
-                    
-            elif edge['target'] in ['Port']:
-                data['Package_Name', 'Socket', 'Port'].edge_index = edge_index
-                data['Package_Name', 'Socket', 'Port'].edge_attr = edge_attr
+                    data['Package_Name', 'Action', 'Path'].edge_index = \
+                        torch.cat((data['Package_Name', 'Action', 'Path'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'Action', 'Path'].edge_attr = \
+                        torch.cat((data['Package_Name', 'Action', 'Path'].edge_attr, edge_attr), dim=0)
 
-            elif edge['target'] in ['Hostnames']:
-                data['Package_Name', 'Socket', 'Hostnames'].edge_index = edge_index
-                data['Package_Name', 'Socket', 'Hostnames'].edge_attr = edge_attr
-    
+            elif edge_type == ('Package_Name', 'DNS', 'DNS Host'):
+                if ('Package_Name', 'DNS', 'DNS Host') not in data.edge_types:
+                    data['Package_Name', 'DNS', 'DNS Host'].edge_index = edge_index
+                    data['Package_Name', 'DNS', 'DNS Host'].edge_attr = edge_attr
+                else:
+                    data['Package_Name', 'DNS', 'DNS Host'].edge_index = \
+                        torch.cat((data['Package_Name', 'DNS', 'DNS Host'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'DNS', 'DNS Host'].edge_attr = \
+                        torch.cat((data['Package_Name', 'DNS', 'DNS Host'].edge_attr, edge_attr), dim=0)
+
+            elif edge_type == ('Package_Name', 'CMD', 'Command'):
+                if ('Package_Name', 'CMD', 'Command') not in data.edge_types:
+                    data['Package_Name', 'CMD', 'Command'].edge_index = edge_index
+                    data['Package_Name', 'CMD', 'Command'].edge_attr = edge_attr
+                else:
+                    data['Package_Name', 'CMD', 'Command'].edge_index = \
+                        torch.cat((data['Package_Name', 'CMD', 'Command'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'CMD', 'Command'].edge_attr = \
+                        torch.cat((data['Package_Name', 'CMD', 'Command'].edge_attr, edge_attr), dim=0)
+
+            elif edge_type == ('Package_Name', 'socket', 'IP'):
+                if ('Package_Name', 'socket', 'IP') not in data.edge_types:
+                    data['Package_Name', 'socket', 'IP'].edge_index = edge_index
+                    data['Package_Name', 'socket', 'IP'].edge_attr = edge_attr
+                else:
+                    data['Package_Name', 'socket', 'IP'].edge_index = \
+                        torch.cat((data['Package_Name', 'socket', 'IP'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'socket', 'IP'].edge_attr = \
+                        torch.cat((data['Package_Name', 'socket', 'IP'].edge_attr, edge_attr), dim=0)
+
+            elif edge_type == ('Package_Name', 'socket', 'Port'):
+                if ('Package_Name', 'socket', 'Port') not in data.edge_types:
+                    data['Package_Name', 'socket', 'Port'].edge_index = edge_index
+                    data['Package_Name', 'socket', 'Port'].edge_attr = edge_attr
+                else:
+                    data['Package_Name', 'socket', 'Port'].edge_index = \
+                        torch.cat((data['Package_Name', 'socket', 'Port'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'socket', 'Port'].edge_attr = \
+                        torch.cat((data['Package_Name', 'socket', 'Port'].edge_attr, edge_attr), dim=0)
+
     return data, global_node_id_map, global_node_counter
 
 
-# def mask_subgraph(data: HeteroData):
+def hetero_graph_build(subgraph, global_node_id_map, global_node_counter):
 
-#     # Subgraph extraction and node/edge masking
-#     # Create a mask for nodes in the subgraph (e.g., for nodes 0 and 1)
-#     node_mask = torch.tensor([True, True, False])  # Example: mask out node 2
-#     edge_mask = torch.tensor([True, False])  # Example: mask out second edge
+    data = HeteroData()
 
-#     # Subgraph extraction using the node mask
-#     subgraph_data = subgraph(node_mask, data.edge_index, relabel_nodes=True)
+    nodes = subgraph['nodes']
+    edges = subgraph['edges']
+    label = subgraph['label']
+    
+    # Add the label as a graph-level attribute
+    data['label'] = torch.tensor([label], dtype=torch.long)
 
-#     # Apply edge mask to subgraph
-#     subgraph_data.edge_index = subgraph_data.edge_index[:, edge_mask]
+    data, global_node_id_map, global_node_counter = nodes_process(nodes, global_node_id_map, global_node_counter, data)
+
+    # process edges (aligning edge indices with global node IDs)
+    data, global_node_id_map, global_node_counter = edges_process(edges, global_node_id_map, global_node_counter, data)
+    
+    return data, global_node_id_map, global_node_counter
 
 if __name__ == "__main__":
     pass

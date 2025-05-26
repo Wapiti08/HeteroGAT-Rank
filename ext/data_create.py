@@ -13,7 +13,7 @@ node: {
     "source": str content,
     "target": str content,
     "value": str content,
-    "type": Action (Path)| DNS(Hostname) | CMD (command) | Socket (IP, Port, Hostnames)
+    "type": Action (Path)| DNS(Hostname) | CMD (command) | socket (IP, Port, Hostnames)
  }
  
  '''
@@ -42,9 +42,8 @@ edge_types = [
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'Socket', 'IP'),
-            ('Package_Name', 'Socket', 'Port'),
-            # ('Package_Name', 'Socket', 'Hostnames'),
+            ('Package_Name', 'socket', 'IP'),
+            ('Package_Name', 'socket', 'Port'),
         ]
 
 
@@ -73,6 +72,12 @@ def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
 
     return data, global_node_id_map, global_node_counter
 
+# def adjust_max_num_if_needed(max_num, num_edges):
+#     ''' Adjust max_num if num_edges exceeds it '''
+#     if num_edges > max_num:
+#         max_num = num_edges
+#         print(f"Adjusted max_num to {max_num} to accommodate {num_edges} edges.")
+#     return max_num
 
 def get_max_size(file_path):
     # Step 1: Load the data from the pickle file
@@ -124,16 +129,20 @@ def get_max_size(file_path):
 
 class LabeledSubGraphs(Dataset):
     
-    def __init__(self, root, batch_size, transform, pre_transform, pre_filter):
+    def __init__(self, root, batch_size, transform, pre_transform, pre_filter, checkpoint_interval=50):
         '''
         :param root: root directory where the dataset is stored
         :param batch_size: number of subgraphs to store in a single file
         :param transform: a function/transform applied to data objects
         :param pre_transform: a function applied before saving to disk
         :param pre_filter: a function to filter data objects
+        :param checkpoint_interval: Number of batches after which the state is saved
+
         '''
         self.batch_size = self.get_adaptive_batch_size(batch_size)
         self.data_path = root
+        self.checkpoint_interval = checkpoint_interval
+
         super().__init__(root, transform, pre_transform, pre_filter)
 
     @staticmethod
@@ -159,7 +168,7 @@ class LabeledSubGraphs(Dataset):
     @staticmethod
     def get_max_parallel_tasks(task_cpus = 2, utilization_ratio=0.98):
         # there are 48 total available cpus
-        available = ray.available_resources().get("CPU", 32)  
+        available = ray.available_resources().get("CPU", 64)  
         usable = int(available * utilization_ratio)
         return max(1, usable // task_cpus)
 
@@ -174,43 +183,54 @@ class LabeledSubGraphs(Dataset):
         """
         for node_type, max_num in max_nodes_per_type.items():
             # get node features
-            for node_type in node_types:
-                node_features = subgraph[node_type].x if node_type in  \
-                    subgraph.node_types else sparsepad.sparse_zeros(max_num, target_feature_dim)
-                
-                if node_features.size(0) < max_num:
-                    subgraph[node_type].x = sparsepad.sparse_padding_with_values(node_features, max_num, target_feature_dim)
-
+            node_features = subgraph[node_type].x if node_type in  \
+                subgraph.node_types else sparsepad.sparse_zeros(max_num, target_feature_dim)
+            
+            if node_features.size(0) < max_num:
+                subgraph[node_type].x = sparsepad.sparse_padding_with_values(node_features, max_num, target_feature_dim)
 
         for edge_type, max_num in max_edges_per_type.items():
-            for edge_type in edge_types:
-                # Check if edge_type exists in the subgraph
-                if edge_type in subgraph.edge_types:
-                    # If edge_type exists, use the existing edge_index
-                    edge_index = subgraph[edge_type].edge_index
-                else:
-                    # If edge_type does not exist, apply padding
-                    edge_index = sparsepad.sparse_zeros_edges(max_num)
-                    # Update the subgraph with the padded edge_index for the missing edge_type
-                    subgraph[edge_type].edge_index = edge_index
+            for edge_type_tuple in edge_types:
+                # the middle element in tuple is edge_type
+                if edge_type == edge_type_tuple[1]:
+                    # Check if edge_type exists in the subgraph
+                    if edge_type_tuple in subgraph.edge_types:
+                        # If edge_type exists, use the existing edge_index
+                        edge_index = subgraph[edge_type_tuple].edge_index
+                    else:
+                        # If edge_type does not exist, apply padding
+                        edge_index = sparsepad.sparse_zeros_edges(max_num)
+                        # Update the subgraph with the padded edge_index for the missing edge_type
+                        subgraph[edge_type_tuple].edge_index = edge_index
 
-                num_edges = edge_index.size(1)
+                    num_edges = edge_index.size(1)
 
-                # cal necessary padding size
-                padding_size = max_num - num_edges
-                if padding_size > 0:
-                    # edge_index is [2, max_num]
-                    subgraph[edge_type].edge_index = sparsepad.sparse_padding_with_values_edges(edge_index, max_num)
-                
-                if hasattr(subgraph[edge_type], 'edge_attr'):
-                    edge_attr = subgraph[edge_type].edge_attr
-                    if edge_attr.size(0) < max_num:
-                        # the default edge attr feature dim is 16
-                        subgraph[edge_type].edge_attr = sparsepad.sparse_padding_with_values(edge_attr, max_num, 16)
-                else:
-                    # If edge_attr does not exist, create a new edge_attr filled with zeros
-                    subgraph[edge_type].edge_attr = sparsepad.sparse_zeros_edges(max_num)
-                    print(f"Created new edge_attr for {edge_type} with zeros.")
+                    # cal necessary padding size
+                    padding_size = max_num - num_edges
+
+                    if padding_size < 0:
+                        print(edge_index)
+                        print(edge_index.shape)
+                        print(edge_type_tuple)
+
+                    # if padding_size <0:
+                    #     # if the num_edges exceeds max_num, adjust max_num
+                    #     max_num = adjust_max_num_if_needed(max_num, num_edges)
+                    #     padding_size = 0
+
+                    if padding_size > 0:
+                        # edge_index is [2, max_num]
+                        subgraph[edge_type_tuple].edge_index = sparsepad.sparse_padding_with_values_edges(edge_index, max_num)
+                    
+                    if hasattr(subgraph[edge_type_tuple], 'edge_attr'):
+                        edge_attr = subgraph[edge_type_tuple].edge_attr
+                        if edge_attr.size(0) < max_num:
+                            # the default edge attr feature dim is 16
+                            subgraph[edge_type_tuple].edge_attr = sparsepad.sparse_padding_with_values(edge_attr, max_num, 16)
+                    else:
+                        # If edge_attr does not exist, create a new edge_attr filled with zeros
+                        subgraph[edge_type_tuple].edge_attr = sparsepad.sparse_zeros_edges_attrs(max_num, 16)
+                        print(f"Created new edge_attr for {edge_type_tuple} with zeros.")
             
         return subgraph
         
@@ -231,19 +251,20 @@ class LabeledSubGraphs(Dataset):
         # initialize ray
         ray.init(ignore_reinit_error=True, runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                         "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
-        
-        # second round of generation
-        chunk_id = 0
-        
         # Global ID mapping
-        global_node_id_map = {}
-        global_node_counter = 0
+        global_node_id_map, global_node_counter, chunk_id = self.load_state()  
+        processed_files = list(set(self.processed_file_names))
 
         # process in chunks, like every 100 subgraphs every time in 9k
         for batch in load_in_chunks(raw_path, self.batch_size):
             batch_tasks = []
 
             for subgraph in batch:
+                # Skip processing if the subgraph has already been processed
+                subgraph_file = f'subgraph_{chunk_id}.pt'
+                if subgraph_file in processed_files:
+                    continue
+
                 task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
                 batch_tasks.append(task)
 
@@ -266,24 +287,53 @@ class LabeledSubGraphs(Dataset):
 
                         # Save the entire HeteroData object as a .pt file
                         torch.save(processed_data, osp.join(self.processed_dir, f'subgraph_{chunk_id}.pt'))
-                
+
+                        # track processed file
+                        processed_files.append(subgraph_file)
+
                 # Remove the tasks that have been processed
                 batch_tasks = remaining
             
+            # periodically save the state
+            if chunk_id % self.checkpoint_interval == 0:
+                self.save_state(global_node_id_map, global_node_counter, chunk_id)
+
             # Increment chunk_id for the next batch
             chunk_id += 1
             # force garbage collection
             gc.collect() 
-            
+        
         # Shutdown Ray after processing
         ray.shutdown()
 
-    def save_global_node_id_map(self, global_node_id_map):
-        # Save the global node ID mapping to a file
-        with Path(self.processed_dir).parent.joinpath('global_node_id_map.pkl', 'wb') as f:
-            pickle.dump(global_node_id_map, f)
-        print(f"Global node ID mapping saved to {Path(self.processed_dir).parent.joinpath('global_node_id_map.pkl')}")
+    def save_state(self, global_node_id_map, global_node_counter, chunk_id):
+        """ Save the global_node_id_map, global_node_counter, and chunk_id to disk """
+        state = {
+            "global_node_id_map": global_node_id_map,
+            "global_node_counter": global_node_counter,
+            "chunk_id": chunk_id,
+        }
 
+        state_file = Path(self.processed_dir).parent.joinpath("process_state.pkl")
+        with state_file.open('wb') as f:
+            pickle.dump(state, f)
+        
+        print(f"State saved to {state_file}")
+
+    def load_state(self, ):
+        ''' Load the saved state (global_node_id_map, global_node_counter, and chunk_id)
+        
+        '''
+        state_file = Path(self.processed_dir).parent.joinpath("process_state.pkl")
+        if state_file.exists():
+            with state_file.open("rb") as f:
+                state = pickle.load(f)
+            print(f"State loaded from {state_file}")
+
+            return state['global_node_id_map'], state['global_node_counter'], state['chunk_id']
+        else:
+            print("No saved state found. Starting fresh.")
+            return {}, 0, 0
 
     def len(self):
         return len(self.processed_file_names)

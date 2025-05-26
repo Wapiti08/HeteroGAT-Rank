@@ -6,7 +6,7 @@
 
 
 # predefined node types
-node_types = ["Path", "Hostname", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+node_types = ["Path", "Hostname", "Package_Name", "IP", "Command", "Port"]
 
 import sys
 from pathlib import Path

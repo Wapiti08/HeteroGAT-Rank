@@ -43,13 +43,13 @@ def miss_check(x_dict, node_types, hidden_dim):
 
 def load_global_node_id_map(map_file_path):
     ''' load the global node ID mapping from a file '''
+    print(map_file_path)
     if Path(map_file_path).exists():
         with open(map_file_path, 'rb') as f:
             global_node_id_map = pickle.load(f)
-        return global_node_id_map
+        return global_node_id_map['global_node_id_map']
     else:
         return None
-
 
 def get_ori_node_value(global_node_id, global_node_id_map):
     return global_node_id_map.get(global_node_id, None)
@@ -82,7 +82,7 @@ def global_to_local_map(x_dict, edge_index_dict):
     return global_to_local_map
 
 
-def remap_edge_indices(edge_index, global_to_local_mapping):
+def remap_edge_indices(edge_index, global_to_local_mapping, src_type, tgt_type):
     """
     Remap the global node indices in edge_index to local indices using the local_to_global_mapping.
     
@@ -96,52 +96,23 @@ def remap_edge_indices(edge_index, global_to_local_mapping):
     src = edge_index[0]
     tgt = edge_index[1]
 
+    src_map = global_to_local_mapping[src_type]
+    tgt_map = global_to_local_mapping[tgt_type]
+
     # Initialize lists to store the local indices
     src_local = []
     tgt_local = []
+    # avoid miss matched indices
+    for s, t in zip(src, tgt):
+            s_item = s.item()
+            t_item = t.item()
+            
+            if s_item in src_map and t_item in tgt_map:
+                src_local.append(src_map[s_item])
+                tgt_local.append(tgt_map[t_item])
+            # else: skip the edge completely
 
-    for s in src:
-        s_item = s.item()
-        found = False
-        for node_type, mapping in global_to_local_mapping.items():
-            if s_item in mapping:
-                src_local.append(mapping[s_item])
-                found = True
-                break
-        if not found:
-            # print(f"Warning: Node {s_item} not found in global_to_local_mapping. Skipping this edge.")
-            src_local.append(0)  # Handle missing node gracefully
-
-    for t in tgt:
-        t_item = t.item()
-        found = False
-        for node_type, mapping in global_to_local_mapping.items():
-            if t_item in mapping:
-                tgt_local.append(mapping[t_item])
-                found = True
-                break
-        if not found:
-            # print(f"Warning: Node {t_item} not found in global_to_local_mapping. Skipping this edge.")
-            tgt_local.append(0)  # Handle missing node gracefully
-
-    # Skip the edge if either list is empty
-    if not src_local or not tgt_local:
-        # print("Skipping this edge due to empty source or target list.")
-        return torch.empty(2, 0)  # Return an empty tensor for invalid edges
-
-    # Convert lists back to tensors
-    src_local = torch.tensor(src_local)
-    tgt_local = torch.tensor(tgt_local)
-
-    # Check if the tensors have the same size
-    if src_local.size(0) != tgt_local.size(0):
-        print(f"Error: Mismatched sizes: src_local = {src_local.size(0)}, tgt_local = {tgt_local.size(0)}")
-        return torch.empty(2, 0)  # Return an empty tensor in case of size mismatch
-
-    # Stack and return the remapped edge indices
-    remapped_edge_index = torch.stack([src_local, tgt_local], dim=0)
-    
-    return remapped_edge_index
+    return torch.tensor([src_local, tgt_local], dtype=torch.long, device=edge_index.device)
 
 # check the index and size to avoid cuda error
 def sani_edge_index(edge_index, num_src_nodes, num_tgt_nodes, global_to_local_mapping):

@@ -109,3 +109,12 @@ def sparse_zeros_edges(max_num):
     sparse_tensor = torch.sparse.FloatTensor(indices, values, torch.Size([2, max_num]))  # Shape: [2, max_num]
 
     return sparse_tensor
+
+def sparse_zeros_edges_attrs(max_num, feature_dim=16):
+    indices = torch.zeros(2, 0, dtype=torch.long)  # Initially empty indices
+    values = torch.zeros(0, dtype=torch.float32)  # Initially empty values
+
+    # Create the sparse tensor with shape [max_num, feature_dim]
+    sparse_tensor = torch.sparse.FloatTensor(indices, values, torch.Size([max_num, feature_dim]))
+
+    return sparse_tensor

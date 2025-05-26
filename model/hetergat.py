@@ -14,22 +14,21 @@ from collections import defaultdict
 import pandas as pd
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class HeterGAT(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels, num_heads, edge_attr_dim):
+    def __init__(self, hidden_channels, num_heads, edge_attr_dim, processed_dir):
         super(HeterGAT, self).__init__()
 
         self.edge_types = [
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'Socket', 'IP'),
-            ('Package_Name', 'Socket', 'Port'),
-            # ('Package_Name', 'Socket', 'Hostnames'),
+            ('Package_Name', 'socket', 'IP'),
+            ('Package_Name', 'socket', 'Port'),
         ]
 
         self.conv1 = HeteroConv(
@@ -49,9 +48,14 @@ class HeterGAT(torch.nn.Module):
         # Binary cross-entropy loss with optional class weighting
         self.loss_fn = nn.BCEWithLogitsLoss()
 
-        node_id_map_file = Path(self.processed_dir).parent.joinpath('global_node_id_map.pkl')
+        node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
 
         self.global_node_id_map = load_global_node_id_map(node_id_map_file)
+
+        # for ranking purpose
+        self.global_edge_atten_map = defaultdict(float)
+        self.global_node_rank_map = defaultdict(float)
+        self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
         ''' custom version of HeteroGonv that returns attention weights for bipartite graph
@@ -68,6 +72,9 @@ class HeterGAT(torch.nn.Module):
         # Create a dictionary to store the mapping between nodes and attention scores
         edge_atten_map = {}
 
+        # generate projection from global to local
+        g2l_map = global_to_local_map(x_dict, edge_index_dict)
+
         for edge_type, conv in conv_module.convs.items():
             src_type, _, tgt_type = edge_type
             # ensure src_type is "Package_Name"
@@ -83,23 +90,31 @@ class HeterGAT(torch.nn.Module):
                 continue  # Skip if the target type is missing
 
             x_tgt = x_dict[tgt_type]
+            x_src = x_dict[src_type]
             edge_index = edge_index_dict[edge_type]
 
             if edge_index.is_sparse:
                 edge_index = edge_index.coalesce().indices()
 
-            out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+            local_edge_index = remap_edge_indices(edge_index, g2l_map, src_type, tgt_type)
+
+            # shape of alpha is [num_edges, num_heads]
+            out, (_, alpha) = conv((x_src, x_tgt), local_edge_index, return_attention_weights=True)
+
+            assert local_edge_index.shape[1] == alpha.shape[0], \
+            f"Edge count mismatch: edge_index has {local_edge_index.shape[1]}, but alpha has {alpha.shape[0]}"
 
             # reverse lookup of global node indices to original node values
-            for i in range(edge_index.shape[1]):
+            for i in range(local_edge_index.shape[1]):
                 src_node_idx = edge_index[0, i].item()
                 tgt_node_idx = edge_index[1, i].item()
 
                 # retrieve the original node values using reverse lookup
                 src_node_value = get_ori_node_value(src_node_idx, self.global_node_id_map)
                 tgt_node_value = get_ori_node_value(tgt_node_idx, self.global_node_id_map)
+
                 # Store the edge, original node values, and the attention score in the map
-                edge_atten_map[(src_node_value, tgt_node_value)] = alpha[0, i].item()
+                edge_atten_map[(src_node_value, tgt_node_value)] = alpha[i, 0].item()
 
             attn_weights[edge_type] = alpha
             out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
@@ -143,7 +158,7 @@ class HeterGAT(torch.nn.Module):
         # dynamically infer classifier input size
         logits = nn.Linear(in_channels, 1).to(graph_embed.device)(graph_embed).squeeze(-1)
 
-        return logits, {"conv1": attn_weights_1, "conv2": attn_weights_2}, {'conv1': edge_atten_map_1, "conv2": edge_atten_map_2}
+        return logits, attn_weights_2, edge_atten_map_2
     
     
     def compute_loss(self, logits, batch):
@@ -174,22 +189,20 @@ class HeterGAT(torch.nn.Module):
 
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
-    
 
-
-    def rank_edges(self, attn_weights, k:int, noise_factor:float):
+    def rank_edges(self, atten_weights, k:int, noise_factor:float):
         ''' rank the edges based on the attention weights
         '''
-        top_k_edges = {}
-        for edge_type, weights in attn_weights.items():
-            # weights is a tensor of shape (num_edges, num_heads)
 
-            # Compute the mean (or max, sum, etc.) attention weight for each edge across all heads
-            mean_weights = weights.mean(dim=1) # shape: [num_edges]
+        top_k_edges = {}
+        for edge_type, weights in atten_weights.items():
+            # weights is a tensor of shape (num_edges, num_heads)
+            # Compute the mean attention weight for each edge across all heads
+            mean_weights = weights.mean(dim=1).to(device)  # shape: [num_edges]
 
             # add random noise to break ties in case of identical attention weights
             if noise_factor:
-                noise = torch.randn(mean_weights) * noise_factor
+                noise = torch.randn(mean_weights.shape) * noise_factor
                 mean_weights = mean_weights + noise
             # sort the edges by their mean attention weight
             sorted_indices = torch.argsort(mean_weights, descending=True)
@@ -201,11 +214,10 @@ class HeterGAT(torch.nn.Module):
             top_k_edge_for_type = top_k_edge_indices.tolist()
 
             # add the selected top k edges for the current edge type
-            top_k_edges.extend(top_k_edge_for_type)
+            top_k_edges[edge_type] = top_k_edge_for_type
 
         return top_k_edges
     
-
     def rank_nodes_by_eco_system(self, edge_atten_map, node_json:list, k):
         ''' Rank target nodes (tgt_node_value) by eco_system consideration
         
@@ -251,3 +263,21 @@ class HeterGAT(torch.nn.Module):
         top_k_global_nodes = [node for node, score in sorted_tgt_nodes[:k]]
 
         return top_k_global_nodes
+
+    def final_sample(self, atten_weights, edge_atten_map, node_json, k, noise_factor):
+        ''' perform final sampling based on the combined top-k rankings of edges and nodes
+        
+        '''
+        # step 1: rank edges based on attention weights
+        top_k_edges = self.rank_edges(atten_weights, k, noise_factor)
+
+        # step 2: rank nodes by eco system
+        top_k_nodes_by_eco_system = self.rank_nodes_by_eco_system(edge_atten_map, node_json, k)
+
+        # step 3: rank nodes globally
+        top_k_global_nodes = self.rank_nodes_global(edge_atten_map, k)
+
+    
+
+
+
