@@ -11,6 +11,7 @@ import os
 from utils import evals
 from utils.pregraph import *
 from collections import defaultdict
+from torch.nn import LazyLinear
 import pandas as pd
 
 # predefined node types
@@ -56,6 +57,9 @@ class HeterGAT(torch.nn.Module):
         self.global_edge_atten_map = defaultdict(float)
         self.global_node_rank_map = defaultdict(float)
         self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
+
+        # dynamic track the number of in_channels
+        self.classifier = LazyLinear(1)
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
         ''' custom version of HeteroGonv that returns attention weights for bipartite graph
@@ -164,10 +168,10 @@ class HeterGAT(torch.nn.Module):
         # ---- final classification
         graph_embed = torch.cat(pooled_outputs, dim=-1)
 
-        in_channels = graph_embed.shape[1]
-        print("the input channels are:", in_channels)
+        # in_channels = graph_embed.shape[1]
+        # print("the input channels are:", in_channels)
         # dynamically infer classifier input size
-        logits = nn.Linear(in_channels, 1).to(graph_embed.device)(graph_embed).squeeze(-1)
+        logits = self.classifier(graph_embed).squeeze(-1)
 
         return logits, attn_weights_2, edge_atten_map_2, edge_index_map_2
     

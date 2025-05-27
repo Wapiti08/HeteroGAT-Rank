@@ -9,6 +9,7 @@ import os
 from utils import evals
 from utils.pregraph import *
 from collections import defaultdict
+from torch.nn import LazyLinear
 
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
@@ -85,7 +86,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
 
         # Classifier for binary classification (output of size 1), consider extra input for edge info
-        self.classifier = torch.nn.Linear(out_channels * num_heads, 1)
+        self.classifier = LazyLinear(1)
 
     def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
         ''' Custom version of HeteroGonv that returns attention weights
@@ -205,15 +206,15 @@ class MaskedHeteroGAT(torch.nn.Module):
             pooled = global_mean_pool(x, torch.zeros(x.size(0), dtype=torch.long).to(x.device))
             pooled_outputs.append(pooled)
     
-        # combine pooled node features and aggregated edge features for classification
-        all_pooled_nodes = torch.cat(list(pooled_outputs.values()), dim=0)
+        # ---- final classification
+        graph_embed = torch.cat(pooled_outputs, dim=-1)
 
         # if agg_edge is not None:
         #     combined_features = torch.cat([all_pooled_nodes, agg_edge.view(-1,1)], dim=-1)
         # else:
         #     combined_features = all_pooled_nodes
         
-        logits = self.classifier(combined_features)
+        logits = self.classifier(graph_embed).squeeze(-1)
 
         return logits, link_loss + ent_loss, attn_weights_pooled, edge_atten_map_2, edge_index_map_2
     
@@ -366,9 +367,6 @@ class MaskedHeteroGAT(torch.nn.Module):
         'final_selected_nodes': list(final_selected_nodes),
         'final_selected_edges': final_select_edges
         }
-
-
-
 
 #     def compute_loss(self, probs, labels):
 #         ''' compute the total loss, including BCE loss and regularization
