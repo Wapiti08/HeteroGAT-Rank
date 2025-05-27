@@ -168,7 +168,7 @@ class LabeledSubGraphs(Dataset):
     @staticmethod
     def get_max_parallel_tasks(task_cpus = 2, utilization_ratio=0.98):
         # there are 48 total available cpus
-        available = ray.available_resources().get("CPU", 64)  
+        available = ray.available_resources().get("CPU", 32)  
         usable = int(available * utilization_ratio)
         return max(1, usable // task_cpus)
 

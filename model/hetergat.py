@@ -72,6 +72,9 @@ class HeterGAT(torch.nn.Module):
         # Create a dictionary to store the mapping between nodes and attention scores
         edge_atten_map = {}
 
+        # create a dict to save edge_list with original node value
+        edge_index_map = {}
+
         # generate projection from global to local
         g2l_map = global_to_local_map(x_dict, edge_index_dict)
 
@@ -104,6 +107,9 @@ class HeterGAT(torch.nn.Module):
             assert local_edge_index.shape[1] == alpha.shape[0], \
             f"Edge count mismatch: edge_index has {local_edge_index.shape[1]}, but alpha has {alpha.shape[0]}"
 
+            # collect edges in terms of actual node values
+            edge_list = []
+
             # reverse lookup of global node indices to original node values
             for i in range(local_edge_index.shape[1]):
                 src_node_idx = edge_index[0, i].item()
@@ -116,15 +122,19 @@ class HeterGAT(torch.nn.Module):
                 # Store the edge, original node values, and the attention score in the map
                 edge_atten_map[(src_node_value, tgt_node_value)] = alpha[i, 0].item()
 
+                # collect edge in node-value form
+                edge_list.append((src_node_value, tgt_node_value))
+
             attn_weights[edge_type] = alpha
             out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
+            edge_index_map[edge_type] = edge_list
         
         # After the first pass, merge the updated features with the original ones for all node types
         for node_type in ori_x_dict:
             if node_type not in out_dict:
                 out_dict[node_type] = ori_x_dict[node_type]
 
-        return out_dict, attn_weights, edge_atten_map
+        return out_dict, attn_weights, edge_atten_map, edge_index_map
 
 
     def forward(self, batch, **kwargs):
@@ -135,12 +145,12 @@ class HeterGAT(torch.nn.Module):
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
 
         # ---- first conv with attention
-        x_dict_1, attn_weights_1, edge_atten_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
+        x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
         x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
         # ---- second conv with attention
 
-        x_dict, attn_weights_2, edge_atten_map_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
+        x_dict, attn_weights_2, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
         # ---- pooling per node type, excluding "Package_Name"
         pooled_outputs = []
@@ -155,10 +165,11 @@ class HeterGAT(torch.nn.Module):
         graph_embed = torch.cat(pooled_outputs, dim=-1)
 
         in_channels = graph_embed.shape[1]
+        print("the input channels are:", in_channels)
         # dynamically infer classifier input size
         logits = nn.Linear(in_channels, 1).to(graph_embed.device)(graph_embed).squeeze(-1)
 
-        return logits, attn_weights_2, edge_atten_map_2
+        return logits, attn_weights_2, edge_atten_map_2, edge_index_map_2
     
     
     def compute_loss(self, logits, batch):
@@ -203,6 +214,7 @@ class HeterGAT(torch.nn.Module):
             # add random noise to break ties in case of identical attention weights
             if noise_factor:
                 noise = torch.randn(mean_weights.shape) * noise_factor
+                noise = noise.to(device)
                 mean_weights = mean_weights + noise
             # sort the edges by their mean attention weight
             sorted_indices = torch.argsort(mean_weights, descending=True)
@@ -264,20 +276,48 @@ class HeterGAT(torch.nn.Module):
 
         return top_k_global_nodes
 
-    def final_sample(self, atten_weights, edge_atten_map, node_json, k, noise_factor):
-        ''' perform final sampling based on the combined top-k rankings of edges and nodes
-        
+    def final_sample(self, top_k_edges_indices, top_k_nodes_by_eco, top_k_global_nodes, edge_index_map):
+        '''
+        Final sampling that returns actual node and edge values
+        Params:
+            atten_weights: dict[edge_type -> Tensor[num_edges, num_heads]]
+            edge_atten_map: dict[(src_node_value, tgt_node_value) -> attn_score]
+            edge_index_map: dict[edge_type -> List[(src_node_value, tgt_node_value)]]
+            node_json: list of node dicts with keys including 'value' and 'eco'
+            k: top-k value
+            noise_factor: float for tie-breaking
+        Returns:
+            dict with top-k edges/nodes in original value form
         '''
         # step 1: rank edges based on attention weights
-        top_k_edges = self.rank_edges(atten_weights, k, noise_factor)
+        top_k_edges = {}
+        for edge_type, indices in top_k_edges_indices.items():
+            edge_list = edge_index_map[edge_type]
+            selected_edges = [edge_list[i] for i in indices if i < len(edge_list)]
+            top_k_edges[edge_type] = selected_edges
 
-        # step 2: rank nodes by eco system
-        top_k_nodes_by_eco_system = self.rank_nodes_by_eco_system(edge_atten_map, node_json, k)
+        # step4: final sample - intersect results
+        final_selected_nodes = set(top_k_global_nodes)
 
-        # step 3: rank nodes globally
-        top_k_global_nodes = self.rank_nodes_global(edge_atten_map, k)
+        for eco_nodes in top_k_nodes_by_eco.values():
+            final_selected_nodes.update(eco_nodes)
+        
+        final_select_edges = {}
+        for edge_type, edge_indices in top_k_edges.items():
+            # filter edges that connect to selected target nodes
+            filtered = [
+                (src, tgt)
+                for (src, tgt) in edge_list
+                if tgt in final_selected_nodes or src in final_selected_nodes
+            ]
+            final_select_edges[edge_type] = filtered
 
-    
-
+        return {
+        'top_k_edges': top_k_edges,
+        'top_k_nodes_by_eco': top_k_nodes_by_eco,
+        'top_k_global_nodes': top_k_global_nodes,
+        'final_selected_nodes': list(final_selected_nodes),
+        'final_selected_edges': final_select_edges
+        }
 
 
