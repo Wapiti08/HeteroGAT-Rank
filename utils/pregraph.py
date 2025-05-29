@@ -43,7 +43,6 @@ def miss_check(x_dict, node_types, hidden_dim):
 
 def load_global_node_id_map(map_file_path):
     ''' load the global node ID mapping from a file '''
-    print(map_file_path)
     if Path(map_file_path).exists():
         with open(map_file_path, 'rb') as f:
             global_node_id_map = pickle.load(f)
@@ -51,8 +50,12 @@ def load_global_node_id_map(map_file_path):
     else:
         return None
 
-def get_ori_node_value(global_node_id, global_node_id_map):
-    return global_node_id_map.get(global_node_id, None)
+def get_ori_node_value(global_node_id, reverse_node_id_map):
+    '''
+    args:
+        reverse_node_id_map: from id to value
+    '''
+    return reverse_node_id_map.get(global_node_id, None)
 
 
 def global_to_local_map(x_dict, edge_index_dict):

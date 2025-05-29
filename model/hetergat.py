@@ -51,7 +51,8 @@ class HeterGAT(torch.nn.Module):
 
         node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
 
-        self.global_node_id_map = load_global_node_id_map(node_id_map_file)
+        global_node_id_map = load_global_node_id_map(node_id_map_file)
+        self.reverse_node_id_map = {v: k for k, v in global_node_id_map.items()}
 
         # for ranking purpose
         self.global_edge_atten_map = defaultdict(float)
@@ -120,8 +121,8 @@ class HeterGAT(torch.nn.Module):
                 tgt_node_idx = edge_index[1, i].item()
 
                 # retrieve the original node values using reverse lookup
-                src_node_value = get_ori_node_value(src_node_idx, self.global_node_id_map)
-                tgt_node_value = get_ori_node_value(tgt_node_idx, self.global_node_id_map)
+                src_node_value = get_ori_node_value(src_node_idx, self.reverse_node_id_map)
+                tgt_node_value = get_ori_node_value(tgt_node_idx, self.reverse_node_id_map)
 
                 # Store the edge, original node values, and the attention score in the map
                 edge_atten_map[(src_node_value, tgt_node_value)] = alpha[i, 0].item()
@@ -205,12 +206,15 @@ class HeterGAT(torch.nn.Module):
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
 
-    def rank_edges(self, atten_weights, k:int, noise_factor:float):
+    def rank_edges(self, atten_weights, edge_index_map, k:int, noise_factor:float):
         ''' rank the edges based on the attention weights
         '''
 
-        top_k_edges = {}
+        top_k_edges_indices = {edge_type: [] for edge_type in atten_weights}
         for edge_type, weights in atten_weights.items():
+            if edge_type not in edge_index_map:
+                print(f"Warning: {edge_type} not found in edge_index_map. Skipping.")
+                continue
             # weights is a tensor of shape (num_edges, num_heads)
             # Compute the mean attention weight for each edge across all heads
             mean_weights = weights.mean(dim=1).to(device)  # shape: [num_edges]
@@ -230,8 +234,20 @@ class HeterGAT(torch.nn.Module):
             top_k_edge_for_type = top_k_edge_indices.tolist()
 
             # add the selected top k edges for the current edge type
-            top_k_edges[edge_type] = top_k_edge_for_type
+            top_k_edges_indices[edge_type] = top_k_edge_for_type
 
+        top_k_edges = {}
+
+        for edge_type in atten_weights.keys():
+            if edge_type not in top_k_edges_indices:
+                # If edge_type was skipped earlier, assign an empty list
+                top_k_edges[edge_type] = []
+                continue
+
+            edge_list = edge_index_map.get(edge_type, [])
+            selected_edges = [edge_list[i] for i in top_k_edges_indices[edge_type] if i < len(edge_list)]
+            top_k_edges[edge_type] = selected_edges
+        
         return top_k_edges
     
     def rank_nodes_by_eco_system(self, edge_atten_map, node_json:list, k):
@@ -280,7 +296,7 @@ class HeterGAT(torch.nn.Module):
 
         return top_k_global_nodes
 
-    def final_sample(self, top_k_edges_indices, top_k_nodes_by_eco, top_k_global_nodes, edge_index_map):
+    def final_sample(self, top_k_edges, top_k_nodes_by_eco, top_k_global_nodes):
         '''
         Final sampling that returns actual node and edge values
         Params:
@@ -293,12 +309,6 @@ class HeterGAT(torch.nn.Module):
         Returns:
             dict with top-k edges/nodes in original value form
         '''
-        # step 1: rank edges based on attention weights
-        top_k_edges = {}
-        for edge_type, indices in top_k_edges_indices.items():
-            edge_list = edge_index_map[edge_type]
-            selected_edges = [edge_list[i] for i in indices if i < len(edge_list)]
-            top_k_edges[edge_type] = selected_edges
 
         # step4: final sample - intersect results
         final_selected_nodes = set(top_k_global_nodes)
@@ -307,7 +317,7 @@ class HeterGAT(torch.nn.Module):
             final_selected_nodes.update(eco_nodes)
         
         final_select_edges = {}
-        for edge_type, edge_indices in top_k_edges.items():
+        for edge_type, edge_list in top_k_edges.items():
             # filter edges that connect to selected target nodes
             filtered = [
                 (src, tgt)

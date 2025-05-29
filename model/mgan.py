@@ -27,8 +27,8 @@ node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 
 if __name__ == "__main__":
 
-    # data_path = Path.cwd().parent.joinpath("ext", "test-small", "processed")
-    data_path = Path.cwd().parent.joinpath("ext", "output_map", "processed")
+    data_path = Path.cwd().parent.joinpath("ext", "output", "processed")
+    # data_path = Path.cwd().parent.joinpath("ext", "output_map", "processed")
     print("Creating iterative dataset")
     # return a batch of 10 subgraphs based on saved format
     dataset = IterSubGraphs(root=data_path, batch_size = 1)
@@ -86,19 +86,8 @@ if __name__ == "__main__":
         for batch in train_loader:
             batch = batch.to(next(model2.parameters()).device)  # Move batch to the same device as model
             optimizer2.zero_grad()
-
             # forward pass
             logits, atten_weight_dict_2, edge_atten_map_2, edge_index_map_2 = model2.forward(batch)
-            
-            # print out top k edges
-            top_k_edges = model2.rank_edges(atten_weight_dict_2, 10, 1e-6)
-
-            # print out top k nodes
-            top_k_nodes_eco_system = model2.rank_nodes_by_eco_system(edge_atten_map_2, node_json, 10)
-
-            top_k_global_nodes = model2.rank_nodes_global(edge_atten_map_2, 10)
-
-
             # compute loss
             loss = model2.compute_loss(logits, batch)
             # backward pass and optimization
@@ -110,55 +99,53 @@ if __name__ == "__main__":
         avg_loss = total_loss/len(train_loader)
         print(f"For HeteroGAT Model: Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}")   
         
-        # rank last conv_weight_dict
-        top_k_edges_indices = model2.rank_edges(atten_weight_dict_2, 10, 1e-6)
-        print(top_k_edges_indices)
-        # rank node by eco system
-        top_k_nodes_by_eco = model2.rank_nodes_by_eco_system(edge_atten_map_2, node_json, 10)
-        print(top_k_nodes_by_eco)
-        # rank node globally
-        top_k_global_nodes = model2.rank_nodes_global(edge_atten_map_2, 10)
-        print(top_k_global_nodes)
-        # final rank
-        print(model2.final_sample(top_k_edges_indices, top_k_nodes_by_eco,top_k_global_nodes, edge_index_map_2))
+    # rank last conv_weight_dict
+    top_k_edges= model2.rank_edges(atten_weight_dict_2, edge_atten_map_2, 10, 1e-6)
+    print(top_k_edges)
+    # rank node by eco system
+    top_k_nodes_by_eco = model2.rank_nodes_by_eco_system(edge_atten_map_2, node_json, 10)
+    print(top_k_nodes_by_eco)
+    # rank node globally
+    top_k_global_nodes = model2.rank_nodes_global(edge_atten_map_2, 10)
+    print(top_k_global_nodes)
+    # final rank
+    print(model2.final_sample(top_k_edges, top_k_nodes_by_eco, top_k_global_nodes))
 
-        # ----- EVALUATION -----
-        model2.eval()
-        all_logits = []
-        all_labels = []
+    # ----- EVALUATION -----
+    model2.eval()
+    all_logits = []
+    all_labels = []
 
-        with torch.no_grad():
-            for batch in test_loader:
-                batch = batch.to(next(model2.parameters()).device)
-                logits, _ = model2(batch)
-                all_logits.append(logits)
-                all_labels.append(batch['label'])
+    with torch.no_grad():
+        for batch in test_loader:
+            batch = batch.to(next(model2.parameters()).device)
+            logits, _ ,_ , _ = model2(batch)
+            all_logits.append(logits)
+            all_labels.append(batch['label'])
 
-        # Concatenate
-        all_logits = torch.cat(all_logits)
-        all_labels = torch.cat(all_labels)
+    # Concatenate
+    all_logits = torch.cat(all_logits)
+    all_labels = torch.cat(all_labels)
 
-        # Compute metrics
-        metrics = model2.evaluate(all_logits, all_labels)
+    # Compute metrics
+    metrics = model2.evaluate(all_logits, all_labels)
 
-        print("Evaluation Metrics for HeteroGAT model: ", metrics)
+    print("Evaluation Metrics for HeteroGAT model: ", metrics)
 
-        model2.plot_metrics(
-            all_labels,
-            torch.sigmoid(all_logits).cpu().numpy(),
-            metrics)
-    
+    model2.plot_metrics(
+        all_labels,
+        torch.sigmoid(all_logits).cpu().numpy(),
+        metrics)
+
     time_spent = datetime.now() - start_time
     hours, remainder = divmod(time_spent.total_seconds(), 3600)
     minutes, seconds = divmod(remainder, 60)
     print(f"Time spent for HeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
-    torch.save(model2, "heterogat_model.pth")
+    torch.save(model2.state_dict(), "heterogat_model_state.pth")
 
     print("Training MaskedHeteroGAT ...")
     batch = next(iter(train_loader))
-
-    print("in_channels: ", list(batch.num_node_features.values())[0])
 
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
@@ -167,6 +154,7 @@ if __name__ == "__main__":
         hidden_channels=256, 
         out_channels=64, 
         num_heads=4, 
+        processed_dir=data_path
     ).to(device)
 
     optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
@@ -189,43 +177,43 @@ if __name__ == "__main__":
 
         print(f"For MaskedHeteroGAT Model: Epoch {epoch+1}, Loss: {total_loss / len(train_loader)}")
 
-        # rank last conv_weight_dict
-        top_k_edges_indices = model1.rank_edges(attn_weights_pooled, 10, 1e-6)
-        print(top_k_edges_indices)
-        # rank node by eco system
-        top_k_nodes_by_eco = model1.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
-        print(top_k_nodes_by_eco)
-        # rank node globally
-        top_k_global_nodes = model1.rank_nodes_global(edge_index_map_pool, 10)
-        print(top_k_global_nodes)
-        # final rank
-        print(model1.final_sample(top_k_edges_indices, top_k_nodes_by_eco,top_k_global_nodes, edge_index_map_pool))
+    # rank last conv_weight_dict
+    top_k_edges = model1.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
+    print(top_k_edges)
+    # rank node by eco system
+    top_k_nodes_by_eco = model1.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
+    print(top_k_nodes_by_eco)
+    # rank node globally
+    top_k_global_nodes = model1.rank_nodes_global(edge_index_map_pool, 10)
+    print(top_k_global_nodes)
+    # final rank
+    print(model1.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-        # --- Evaluation -----
-        model1.eval()
-        all_logits = []
-        all_labels = []
+    # --- Evaluation -----
+    model1.eval()
+    all_logits = []
+    all_labels = []
 
-        with torch.no_grad():
-            for batch in test_loader:
-                batch = batch.to(next(model1.parameters()).device)
-                logits, _, _, _ ,_ = model1(batch)
-                all_logits.append(logits)
-                all_labels.append(batch['label'])
-        
-        # Concatenate
-        all_logits = torch.cat(all_logits)
-        all_labels = torch.cat(all_labels)
+    with torch.no_grad():
+        for batch in test_loader:
+            batch = batch.to(next(model1.parameters()).device)
+            logits, _, _, _ ,_ = model1(batch)
+            all_logits.append(logits)
+            all_labels.append(batch['label'])
+    
+    # Concatenate
+    all_logits = torch.cat(all_logits)
+    all_labels = torch.cat(all_labels)
 
-        # Compute metrics
-        metrics = model1.evaluate(all_logits, all_labels)
+    # Compute metrics
+    metrics = model1.evaluate(all_logits, all_labels)
 
-        print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
+    print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
 
-        model1.plot_metrics(
-            all_labels,
-            torch.sigmoid(logits).cpu().numpy(),
-            metrics)
+    model1.plot_metrics(
+        all_labels,
+        torch.sigmoid(logits).cpu().numpy(),
+        metrics)
 
     time_spent = datetime.now() - start_time
     hours, remainder = divmod(time_spent.total_seconds(), 3600)
@@ -233,7 +221,8 @@ if __name__ == "__main__":
     print(f"Time spent for MaskedHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
     # save the model after training
-    torch.save(model1, "masked_heterogat_model.pth")
+    torch.save(model1.state_dict(), "masked_heterogat_model.pth")
+
 
 
 

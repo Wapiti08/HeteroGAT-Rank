@@ -22,7 +22,7 @@ device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class NSHeteroGAT(torch.nn.Module):
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, num_clusters, fanout=10):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, fanout=10):
         ''' 
         args:
             fanout: number of neighbors to sample for each node --- start with small number 10
@@ -78,7 +78,6 @@ class NSHeteroGAT(torch.nn.Module):
         sampler = sampler.to(device)
         
         edge_sampler = sampler.
-
     
 
 if __name__ == "__main__":

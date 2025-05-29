@@ -35,6 +35,7 @@ import psutil
 from ext import hetergraph
 import gc
 from utils import sparsepad
+import time
 
 node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
 
@@ -53,6 +54,10 @@ def load_in_chunks(file_path, chunk_size):
         # second round of generation
         for i in range(0, len(data), chunk_size):
             yield data[i:i+chunk_size]
+
+def should_pause_for_memory(threshold_gb=95):
+    used = psutil.virtual_memory().used / (1024**3)
+    return used >= threshold_gb
 
 @ray.remote
 def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
@@ -249,7 +254,9 @@ class LabeledSubGraphs(Dataset):
         os.environ["RAY_memory_monitor_refresh_ms"] = "0" 
 
         # initialize ray
-        ray.init(ignore_reinit_error=True, runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
+        ray.init(
+            ignore_reinit_error=True, 
+            runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                         "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
         # Global ID mapping
         global_node_id_map, global_node_counter, chunk_id = self.load_state()  
@@ -293,7 +300,12 @@ class LabeledSubGraphs(Dataset):
 
                 # Remove the tasks that have been processed
                 batch_tasks = remaining
-            
+
+                if should_pause_for_memory():
+                    print("High memory usage. Pausing...")
+                    gc.collect()
+                    time.sleep(10)
+                        
             # periodically save the state
             if chunk_id % self.checkpoint_interval == 0:
                 self.save_state(global_node_id_map, global_node_counter, chunk_id)
