@@ -9,7 +9,7 @@ import os
 from utils import evals
 from utils.pregraph import *
 from collections import defaultdict
-from torch.nn import LazyLinear
+from torch.nn import LazyLinear, LayerNorm
 import pandas as pd
 
 # predefined node types
@@ -71,6 +71,14 @@ class MaskedHeteroGAT(torch.nn.Module):
              for et in self.edge_types},
             aggr='mean',
         )
+
+        # layernorm for each node type after conv1 and conv2
+        self.ln1 = torch.nn.ModuleDict()
+        self.ln2 = torch.nn.ModuleDict()
+
+        for node_type in ["Package_Name", 'Path', 'DNS Host', 'Command', 'IP', 'Port']:
+            self.ln1[node_type] = LayerNorm(hidden_channels * num_heads)
+            self.ln2[node_type] = LayerNorm(hidden_channels * num_heads)
 
         # diffpool layer for hierarchical feature aggregation
         self.hetero_gnn = diffpool.HeteroGNN(
@@ -182,7 +190,11 @@ class MaskedHeteroGAT(torch.nn.Module):
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
-        x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
+        x_dict = {
+            node_type: F.relu(self.ln2[node_type](x))
+            for node_type, x in x_dict_1.items()
+            if node_type in self.ln2
+        }
 
         # ---- diffpool per node type, excluding "Package_Name"
         s_dict = self.hetero_gnn(x_dict, edge_index_dict)
@@ -192,12 +204,14 @@ class MaskedHeteroGAT(torch.nn.Module):
                 )
         
         # last attention weight calculation after pooling
-        x_dict_pooled, attn_weights_pooled, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
+        x_dict_2, attn_weights_pooled, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
 
-        # --- continue with binary classification task at subgraph-level
-
-        # Aggregate edge features
-        # agg_edge = self.agg_edge_features(edge_attr_dict)
+        # ---- Apply LayerNorm and ReLU again
+        x_dict_pooled = {
+            node_type: F.relu(self.ln2[node_type](x))
+            for node_type, x in x_dict_2.items()
+            if node_type in self.ln2
+        }
 
         # ---- pooling per node type, excluding "Package_Name"
         pooled_outputs = []
@@ -210,11 +224,6 @@ class MaskedHeteroGAT(torch.nn.Module):
     
         # ---- final classification
         graph_embed = torch.cat(pooled_outputs, dim=-1)
-
-        # if agg_edge is not None:
-        #     combined_features = torch.cat([all_pooled_nodes, agg_edge.view(-1,1)], dim=-1)
-        # else:
-        #     combined_features = all_pooled_nodes
         
         logits = self.classifier(graph_embed).squeeze(-1)
 

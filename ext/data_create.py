@@ -55,9 +55,9 @@ def load_in_chunks(file_path, chunk_size):
         for i in range(0, len(data), chunk_size):
             yield data[i:i+chunk_size]
 
-def should_pause_for_memory(threshold_gb=95):
-    used = psutil.virtual_memory().used / (1024**3)
-    return used >= threshold_gb
+# def should_pause_for_memory(threshold_gb=128):
+#     used = psutil.virtual_memory().used / (1024**3)
+#     return used >= threshold_gb
 
 @ray.remote
 def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
@@ -171,7 +171,7 @@ class LabeledSubGraphs(Dataset):
         return [f'batch_{i}.pt' for i in range(len(os.listdir(self.processed_dir)))]
 
     @staticmethod
-    def get_max_parallel_tasks(task_cpus = 2, utilization_ratio=0.98):
+    def get_max_parallel_tasks(task_cpus = 1, utilization_ratio=0.98):
         # there are 48 total available cpus
         available = ray.available_resources().get("CPU", 32)  
         usable = int(available * utilization_ratio)
@@ -212,11 +212,6 @@ class LabeledSubGraphs(Dataset):
 
                     # cal necessary padding size
                     padding_size = max_num - num_edges
-
-                    if padding_size < 0:
-                        print(edge_index)
-                        print(edge_index.shape)
-                        print(edge_type_tuple)
 
                     # if padding_size <0:
                     #     # if the num_edges exceeds max_num, adjust max_num
@@ -301,10 +296,10 @@ class LabeledSubGraphs(Dataset):
                 # Remove the tasks that have been processed
                 batch_tasks = remaining
 
-                if should_pause_for_memory():
-                    print("High memory usage. Pausing...")
-                    gc.collect()
-                    time.sleep(10)
+                # if should_pause_for_memory():
+                #     print("High memory usage. Pausing...")
+                #     gc.collect()
+                #     time.sleep(10)
                         
             # periodically save the state
             if chunk_id % self.checkpoint_interval == 0:

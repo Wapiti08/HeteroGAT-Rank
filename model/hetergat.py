@@ -11,7 +11,7 @@ import os
 from utils import evals
 from utils.pregraph import *
 from collections import defaultdict
-from torch.nn import LazyLinear
+from torch.nn import LazyLinear, LayerNorm
 import pandas as pd
 
 # predefined node types
@@ -45,6 +45,14 @@ class HeterGAT(torch.nn.Module):
              for et in self.edge_types},
             aggr='mean',
         )
+
+        # layernorm for each node type after conv1 and conv2
+        self.ln1 = torch.nn.ModuleDict()
+        self.ln2 = torch.nn.ModuleDict()
+
+        for node_type in ["Package_Name", 'Path', 'DNS Host', 'Command', 'IP', 'Port']:
+            self.ln1[node_type] = LayerNorm(hidden_channels * num_heads)
+            self.ln2[node_type] = LayerNorm(hidden_channels * num_heads)
 
         # Binary cross-entropy loss with optional class weighting
         self.loss_fn = nn.BCEWithLogitsLoss()
@@ -152,10 +160,21 @@ class HeterGAT(torch.nn.Module):
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
-        x_dict = {key: F.relu(x) for key, x in x_dict_1.items()}
+        x_dict = {
+            node_type: F.relu(self.ln1[node_type](x)) 
+            for key, x in x_dict_1.items()
+            if node_type in self.ln1
+            }
+        
         # ---- second conv with attention
+        x_dict_2, attn_weights_2, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
-        x_dict, attn_weights_2, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
+        # apply layernorm and relu again
+        x_dict = {
+            node_type: F.relu(self.ln2[node_type](x))
+            for node_type, x in x_dict_2.items()
+            if node_type in self.ln2
+        }
 
         # ---- pooling per node type, excluding "Package_Name"
         pooled_outputs = []
