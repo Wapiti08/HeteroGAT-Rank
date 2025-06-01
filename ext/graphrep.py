@@ -110,11 +110,18 @@ class FeatureExtractor:
         :return: list of nodes
         '''
         path_nodes, file_edges = [], []
+        seen_paths = set()
+
         for feature in ['import_Files', 'install_Files']:
             entities = row.get(feature)
             if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
                 for entity in entities:
-                    path_node = self._create_node(value=entity["Path"], node_type="Path", eco=row["Ecosystem"])
+                    path_value = entity["Path"]
+                    if path_value not in seen_paths:
+                        seen_paths.add(path_value)
+                        path_node = self._create_node(value=path_value, node_type="Path", eco=row["Ecosystem"])
+                        path_nodes.append(path_node)
+
                     file_edge = self._create_edge(
                         source=f"{row['Name']}_{row['Version']}",
                         target=entity["Path"],
@@ -122,7 +129,6 @@ class FeatureExtractor:
                         value="_".join(k for k, v in entity.items() if v is True),
                     )
 
-                    path_nodes.append(path_node)
                     file_edges.append(file_edge)
 
         return path_nodes, file_edges
@@ -151,15 +157,15 @@ class FeatureExtractor:
         
         nodes.extend([self._create_node(ip, "IP", row["Ecosystem"]) for ip in ip_list])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", ip, \
-                                        default_edge_type, default_edge_value) for ip in ip_list])
+                                        default_edge_type+"_ip", default_edge_value) for ip in ip_list])
 
-        nodes.extend([self._create_node(host, "DNS Host", row["Ecosystem"]) for host in host_list])
+        nodes.extend([self._create_node(host, "Hostnames", row["Ecosystem"]) for host in host_list])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", host, \
-                                        default_edge_type, default_edge_value) for host in host_list])
+                                        default_edge_type+"_host", default_edge_value) for host in host_list])
 
         nodes.extend([self._create_node(str(port), "Port", row["Ecosystem"]) for port in port_list])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", port, \
-                                        default_edge_type, default_edge_value) for port in port_list])
+                                        default_edge_type+"_port", default_edge_value) for port in port_list])
         
         return nodes, edges
 

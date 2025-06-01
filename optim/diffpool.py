@@ -128,14 +128,14 @@ class HeteroGNN(torch.nn.Module):
             s = []
             for (src_node_type, edge_type, tgt_node_type), edge_index in edge_index_dict.items():
                 if src_node_type == node_type or tgt_node_type == node_type:
-                    # apply DenseSAGEConv for the current node type
-                    x = x.to(device)
+                    # avoid overwriting of x to extra x
+                    x_input = x.to(device)
                     edge_index = edge_index.to(device)
-                    x = x.float()  # Ensures x is float32
+                    x_input = x_input.float() # Ensures x is float32
                     # edge_index = edge_index.float()  # Ensures edge_index is int64
                     print(x.shape, edge_index.shape)
 
-                    node_features = self.node_type_encoders[node_type](x, edge_index)
+                    node_features = self.node_type_encoders[node_type](x_input, edge_index)
 
                     # compute the assignment matrix for each node type (using softmax)
                     pooled_s = self.pooling_layers[node_type](node_features)
@@ -143,7 +143,7 @@ class HeteroGNN(torch.nn.Module):
                     s.append(pooled_s)
             
             # aggregate the assignment matrices for all edge types
-            s.torch.stack(s, dim=0).mean(dim=0)
+            s = torch.stack(s, dim=0).mean(dim=0)
             s_dict[node_type] = s
         
         return s_dict

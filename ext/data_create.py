@@ -37,14 +37,15 @@ import gc
 from utils import sparsepad
 import time
 
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "Hostnames", "IP", "Command", "Port"]
 
 edge_types = [
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'socket', 'IP'),
-            ('Package_Name', 'socket', 'Port'),
+            ('Package_Name', 'socket_ip', 'IP'),
+            ('Package_Name', 'socket_port', 'Port'),
+            ('Package_Name', 'socket_host', 'Hostnames'),
         ]
 
 
@@ -352,7 +353,8 @@ class LabeledSubGraphs(Dataset):
 
 if __name__ == "__main__":
     # load pickle format of graph dataset with graph representations
-    data_path = Path.cwd().joinpath("output_map")
+    # data_path = Path.cwd().joinpath("output_map")
+    data_path = Path.cwd().joinpath("new")
 
     # create an instance of the dataset
     dataset = LabeledSubGraphs(data_path, 5, None, None, None)

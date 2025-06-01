@@ -13,7 +13,7 @@ from torch.nn import LazyLinear, LayerNorm
 import pandas as pd
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "Hostnames", "IP", "Command", "Port"]
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -37,8 +37,9 @@ class MaskedHeteroGAT(torch.nn.Module):
             ('Package_Name', 'CMD', 'Command'),
             ('Package_Name', 'socket', 'IP'),
             ('Package_Name', 'socket', 'Port'),
+            ('Package_Name', 'socket', 'Hostnames'),
         ]
-    
+
         # GAT layers
         self.conv1 = HeteroConv(
             {et: 
@@ -177,7 +178,7 @@ class MaskedHeteroGAT(torch.nn.Module):
             if node_type not in out_dict:
                 out_dict[node_type] = ori_x_dict[node_type]
 
-        return out_dict, attn_weights, edge_atten_map
+        return out_dict, attn_weights, edge_atten_map, edge_index_map
 
     def forward(self, batch, **kwargs):
         '''
@@ -190,12 +191,18 @@ class MaskedHeteroGAT(torch.nn.Module):
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
-        x_dict = {
-            node_type: F.relu(self.ln2[node_type](x))
-            for node_type, x in x_dict_1.items()
-            if node_type in self.ln2
-        }
-
+                
+        # for debug
+        # for node_type, x in x_dict_1.items():
+        #     print(f"[x_dict_1] {node_type}: shape={x.shape}")
+        x_dict = {}
+        # bypass the process for Package_Name
+        for node_type, x in x_dict_1.items():
+            if node_type in self.ln1 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln1[node_type](x))
+            else:
+                x_dict[node_type] = x
+        
         # ---- diffpool per node type, excluding "Package_Name"
         s_dict = self.hetero_gnn(x_dict, edge_index_dict)
 
@@ -206,17 +213,20 @@ class MaskedHeteroGAT(torch.nn.Module):
         # last attention weight calculation after pooling
         x_dict_2, attn_weights_pooled, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
 
-        # ---- Apply LayerNorm and ReLU again
-        x_dict_pooled = {
-            node_type: F.relu(self.ln2[node_type](x))
-            for node_type, x in x_dict_2.items()
-            if node_type in self.ln2
-        }
+        # apply layernorm and relu again
+        x_dict = {}
+        # bypass the process for Package_Name
+        for node_type, x in x_dict_2.items():
+            if node_type in self.ln1 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln1[node_type](x))
+            else:
+                x_dict[node_type] = x
 
         # ---- pooling per node type, excluding "Package_Name"
         pooled_outputs = []
+
         # aggregate node features
-        for node_type, x in x_dict_pooled.items():
+        for node_type, x in x_dict.items():
             # global_mean_pool does not support sparse tensors
             x = x.to_dense()
             pooled = global_mean_pool(x, torch.zeros(x.size(0), dtype=torch.long).to(x.device))

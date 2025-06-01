@@ -5,6 +5,19 @@ distributed differential graph representation learning for malicious indicators 
 
 ## Environment Setting Up:
 
+- General Package Support
+
+    ```
+    sudo apt update
+    sudo apt install -y \
+    make build-essential libssl-dev zlib1g-dev \
+    libbz2-dev libreadline-dev libsqlite3-dev curl git \
+    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+    libffi-dev liblzma-dev libncurses-dev libgdbm-dev libnss3-dev \
+    uuid-dev libedit-dev libdb-dev libexpat1-dev
+
+    ```
+
 - Download Pyenv:
     ```
     # for linux
@@ -40,6 +53,7 @@ distributed differential graph representation learning for malicious indicators 
     sudo apt-get install libffi-dev # avoid _ctypes error
     sudo apt-get install libbz2-dev # avoid _bz2 error
 
+
     ```
 
 ## Graph Representation
@@ -72,7 +86,14 @@ distributed differential graph representation learning for malicious indicators 
         leaf node: {Hostname}
 
         left node attr: {Types} in list
-    
+
+## Graph Feature 
+
+- For consistency, the number of node and edge should be aligned
+    ```
+    Max nodes per type: {'Command': 2837, 'DNS Host': 7, 'Hostnames': 7, 'IP': 79, 'Package_Name': 1, 'Path': 165142, 'Port': 6}
+    Max edges per type: {'Action': 165145, 'CMD': 2837, 'DNS': 7, 'socket_host': 7, 'socket_ip': 79, 'socket_port': 6}
+    ```
 
 
 

@@ -15,7 +15,7 @@ from torch.nn import LazyLinear, LayerNorm
 import pandas as pd
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "Hostnames", "IP", "Command", "Port"]
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
@@ -30,6 +30,7 @@ class HeterGAT(torch.nn.Module):
             ('Package_Name', 'CMD', 'Command'),
             ('Package_Name', 'socket', 'IP'),
             ('Package_Name', 'socket', 'Port'),
+            ('Package_Name', 'socket', 'Hostnames'),
         ]
 
         self.conv1 = HeteroConv(
@@ -160,21 +161,29 @@ class HeterGAT(torch.nn.Module):
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
-        x_dict = {
-            node_type: F.relu(self.ln1[node_type](x)) 
-            for key, x in x_dict_1.items()
-            if node_type in self.ln1
-            }
+        # for debug
+        # for node_type, x in x_dict_1.items():
+        #     print(f"[x_dict_1] {node_type}: shape={x.shape}")
+
+        x_dict = {}
+        # bypass the process for Package_Name
+        for node_type, x in x_dict_1.items():
+            if node_type in self.ln1 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln1[node_type](x))
+            else:
+                x_dict[node_type] = x
         
         # ---- second conv with attention
         x_dict_2, attn_weights_2, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, x_dict, edge_index_dict)
 
         # apply layernorm and relu again
-        x_dict = {
-            node_type: F.relu(self.ln2[node_type](x))
-            for node_type, x in x_dict_2.items()
-            if node_type in self.ln2
-        }
+        x_dict = {}
+        # bypass the process for Package_Name
+        for node_type, x in x_dict_2.items():
+            if node_type in self.ln1 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln1[node_type](x))
+            else:
+                x_dict[node_type] = x
 
         # ---- pooling per node type, excluding "Package_Name"
         pooled_outputs = []

@@ -5,11 +5,14 @@
 
 all the edge types:
 
-    Package_Name - Action - Path
-    Package_Name - DNS - DNS Host
-    Package_Name - CMD - Command
-    Package_Name - Socket - IP
-    Package_Name - Socket - Port
+    ('Package_Name', 'Action', 'Path'),
+    ('Package_Name', 'DNS', 'DNS Host'),
+    ('Package_Name', 'CMD', 'Command'),
+    ('Package_Name', 'socket_ip', 'IP'),
+    ('Package_Name', 'socket_port', 'Port'),
+    ('Package_Name', 'socket_host', 'Hostnames'),
+
+
 
  '''
 
@@ -24,7 +27,7 @@ from ext import fea_encoder
 import pickle
 
 
-str_node_list = ['Package_Name','Path', 'DNS Host', 'Command', "IP", "Sockets"]
+str_node_list = ['Package_Name', 'Path', 'DNS Host', "Hostnames", 'Command', "IP", "Port"]
 long_str_node_list = ['Path', "Command"]
 cate_node_list = ['Action', "DNS"]
 
@@ -106,8 +109,9 @@ def edges_process(edges:list, global_node_id_map, global_node_counter, data: Het
     ('Package_Name', 'DNS', 'DNS Host'): [],
     ('Package_Name', 'Action', 'Path'): [],
     ('Package_Name', 'CMD', 'Command'): [],
-    ('Package_Name', 'socket', 'IP'): [],
-    ('Package_Name', 'socket', 'Port'): []
+    ('Package_Name', 'socket_ip', 'IP'): [],
+    ('Package_Name', 'socket_port', 'Port'): [],
+    ('Package_Name', 'socket_host', 'Hostnames'):[],
     }
 
     for edge in edges:
@@ -124,10 +128,12 @@ def edges_process(edges:list, global_node_id_map, global_node_counter, data: Het
             edge_type_dict[('Package_Name', 'DNS', 'DNS Host')].append((source_idx, target_idx))
         elif edge_type == 'CMD':
             edge_type_dict[('Package_Name', 'CMD', 'Command')].append((source_idx, target_idx))
-        elif edge_type == 'Socket' and edge['target'] == 'IP':
-            edge_type_dict[('Package_Name', 'socket', 'IP')].append((source_idx, target_idx))
-        elif edge_type == 'Socket' and edge['target'] == 'Port':
-            edge_type_dict[('Package_Name', 'socket', 'Port')].append((source_idx, target_idx))
+        elif edge_type == 'socket_ip' and edge['target'] == 'IP':
+            edge_type_dict[('Package_Name', 'socket_ip', 'IP')].append((source_idx, target_idx))
+        elif edge_type == 'socket_port' and edge['target'] == 'Port':
+            edge_type_dict[('Package_Name', 'socket_port', 'Port')].append((source_idx, target_idx))
+        elif edge_type == 'socket_host' and edge['target'] == 'Hostnames':
+            edge_type_dict[('Package_Name', 'socket_host', 'Hostnames')].append((source_idx, target_idx))
 
     for edge_type, edge_tuples in edge_type_dict.items():
         if edge_tuples:
@@ -168,25 +174,35 @@ def edges_process(edges:list, global_node_id_map, global_node_counter, data: Het
                     data['Package_Name', 'CMD', 'Command'].edge_attr = \
                         torch.cat((data['Package_Name', 'CMD', 'Command'].edge_attr, edge_attr), dim=0)
 
-            elif edge_type == ('Package_Name', 'socket', 'IP'):
-                if ('Package_Name', 'socket', 'IP') not in data.edge_types:
-                    data['Package_Name', 'socket', 'IP'].edge_index = edge_index
-                    data['Package_Name', 'socket', 'IP'].edge_attr = edge_attr
+            elif edge_type == ('Package_Name', 'socket_ip', 'IP'):
+                if ('Package_Name', 'socket_ip', 'IP') not in data.edge_types:
+                    data['Package_Name', 'socket_ip', 'IP'].edge_index = edge_index
+                    data['Package_Name', 'socket_ip', 'IP'].edge_attr = edge_attr
                 else:
-                    data['Package_Name', 'socket', 'IP'].edge_index = \
+                    data['Package_Name', 'socket_ip', 'IP'].edge_index = \
                         torch.cat((data['Package_Name', 'socket', 'IP'].edge_index, edge_index), dim=1)
-                    data['Package_Name', 'socket', 'IP'].edge_attr = \
-                        torch.cat((data['Package_Name', 'socket', 'IP'].edge_attr, edge_attr), dim=0)
+                    data['Package_Name', 'socket_ip', 'IP'].edge_attr = \
+                        torch.cat((data['Package_Name', 'socket_ip', 'IP'].edge_attr, edge_attr), dim=0)
 
-            elif edge_type == ('Package_Name', 'socket', 'Port'):
-                if ('Package_Name', 'socket', 'Port') not in data.edge_types:
-                    data['Package_Name', 'socket', 'Port'].edge_index = edge_index
-                    data['Package_Name', 'socket', 'Port'].edge_attr = edge_attr
+            elif edge_type == ('Package_Name', 'socket_port', 'Port'):
+                if ('Package_Name','socket_port', 'Port') not in data.edge_types:
+                    data['Package_Name', 'socket_port', 'Port'].edge_index = edge_index
+                    data['Package_Name', 'socket_port', 'Port'].edge_attr = edge_attr
                 else:
-                    data['Package_Name', 'socket', 'Port'].edge_index = \
-                        torch.cat((data['Package_Name', 'socket', 'Port'].edge_index, edge_index), dim=1)
-                    data['Package_Name', 'socket', 'Port'].edge_attr = \
-                        torch.cat((data['Package_Name', 'socket', 'Port'].edge_attr, edge_attr), dim=0)
+                    data['Package_Name', 'socket_port', 'Port'].edge_index = \
+                        torch.cat((data['Package_Name', 'socket_port', 'Port'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'socket_port', 'Port'].edge_attr = \
+                        torch.cat((data['Package_Name', 'socket_port', 'Port'].edge_attr, edge_attr), dim=0)
+            
+            elif edge_type == ('Package_Name', 'socket_host', 'Hostnames'):
+                if ('Package_Name',  'socket_host', 'Hostnames') not in data.edge_types:
+                    data['Package_Name',  'socket_host', 'Hostnames'].edge_index = edge_index
+                    data['Package_Name',  'socket_host', 'Hostnames'].edge_attr = edge_attr
+                else:
+                    data['Package_Name',  'socket_host', 'Hostnames'].edge_index = \
+                        torch.cat((data['Package_Name', 'socket_host', 'Hostnames'].edge_index, edge_index), dim=1)
+                    data['Package_Name', 'socket_host', 'Hostnames'].edge_attr = \
+                        torch.cat((data['Package_Name', 'socket_host', 'Hostnames'].edge_attr, edge_attr), dim=0)
 
     return data, global_node_id_map, global_node_counter
 

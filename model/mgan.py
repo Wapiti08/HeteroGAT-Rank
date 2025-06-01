@@ -151,7 +151,7 @@ if __name__ == "__main__":
     model1 = MaskedHeteroGAT(
         # default is 400
         in_channels= list(batch.num_node_features.values())[0],
-        hidden_channels=256, 
+        hidden_channels=64, 
         out_channels=64, 
         num_heads=4, 
         processed_dir=data_path
