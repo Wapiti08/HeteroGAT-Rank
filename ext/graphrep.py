@@ -19,6 +19,7 @@
  
  
  '''
+
 import pandas as pd
 from pathlib import Path
 import ray
@@ -29,12 +30,44 @@ from tqdm import tqdm
 from typing import List, Dict, Tuple
 import pickle
 
+
+def process_string(input_string, max_len=500):
+    # step1: split the string by spaces
+    parts = input_string.split()
+
+    # step2: remove repeated values -- keeps the order while removing duplicates
+    unique_parts = list(dict.fromkeys(parts))
+
+    # step3: keep only the last two layers of each path and remove hash-like parts
+    processed_parts = []
+    for part in unique_parts:
+        # remove hash-like parts
+        if re.search(r'[a-fA-F0-9\-]{5,}', part):
+            continue
+
+        # if the part looks like a path
+        if "/" in part:
+            path_parts = part.split("/")
+            # keep the last two layers
+            processed_part = '/'.join(path_parts[-2:])
+            processed_parts.append(processed_part)
+        else:
+            processed_parts.append(part)
+    
+    # step4: tjoin the processed parts into a string
+    result_string = ''.join(processed_parts)
+
+    # step5: trim the string to the max length if necessary
+    if len(result_string) > max_len:
+        result_string = result_string[:max_len]
+
+    return result_string
+
 class FeatureExtractor:
     
     def __init__(self, data_path: Path):
         self.df = pd.read_pickle(data_path)
         
-
     def _split_chunks(self, default_split = 5) -> List[pd.DataFrame]:
         # Approximate memory per row (1 KB per row)
         rows_per_chunk = 500 * 1024 * 1024 // 1024
@@ -116,7 +149,8 @@ class FeatureExtractor:
             entities = row.get(feature)
             if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
                 for entity in entities:
-                    path_value = entity["Path"]
+                    raw_path = entity["Path"]
+                    path_value = process_string(raw_path)
                     if path_value not in seen_paths:
                         seen_paths.add(path_value)
                         path_node = self._create_node(value=path_value, node_type="Path", eco=row["Ecosystem"])
@@ -124,7 +158,7 @@ class FeatureExtractor:
 
                     file_edge = self._create_edge(
                         source=f"{row['Name']}_{row['Version']}",
-                        target=entity["Path"],
+                        target=path_value,
                         edge_type="Action",
                         value="_".join(k for k, v in entity.items() if v is True),
                     )

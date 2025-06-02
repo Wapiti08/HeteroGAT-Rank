@@ -28,9 +28,9 @@ class HeterGAT(torch.nn.Module):
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'socket', 'IP'),
-            ('Package_Name', 'socket', 'Port'),
-            ('Package_Name', 'socket', 'Hostnames'),
+            ('Package_Name', 'socket_ip', 'IP'),
+            ('Package_Name', 'socket_port', 'Port'),
+            ('Package_Name', 'socket_host', 'Hostnames'),
         ]
 
         self.conv1 = HeteroConv(
@@ -51,7 +51,7 @@ class HeterGAT(torch.nn.Module):
         self.ln1 = torch.nn.ModuleDict()
         self.ln2 = torch.nn.ModuleDict()
 
-        for node_type in ["Package_Name", 'Path', 'DNS Host', 'Command', 'IP', 'Port']:
+        for node_type in node_types:
             self.ln1[node_type] = LayerNorm(hidden_channels * num_heads)
             self.ln2[node_type] = LayerNorm(hidden_channels * num_heads)
 
@@ -157,7 +157,6 @@ class HeterGAT(torch.nn.Module):
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
-
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         

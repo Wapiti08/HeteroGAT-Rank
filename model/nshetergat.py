@@ -16,7 +16,7 @@ from utils.pregraph import *
 from torch_geometric.sampler.neighbor_sampler import NeighborSampler
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Package_Name", "IP", "Hostnames", "Command", "Port"]
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -34,8 +34,9 @@ class NSHeteroGAT(torch.nn.Module):
             ('Package_Name', 'Action', 'Path'),
             ('Package_Name', 'DNS', 'DNS Host'),
             ('Package_Name', 'CMD', 'Command'),
-            ('Package_Name', 'socket', 'IP'),
-            ('Package_Name', 'socket', 'Port'),
+            ('Package_Name', 'socket_ip', 'IP'),
+            ('Package_Name', 'socket_port', 'Port'),
+            ('Package_Name', 'socket_host', 'Hostnames'),
         ]
     
         # GAT layers

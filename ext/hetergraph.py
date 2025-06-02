@@ -12,8 +12,6 @@ all the edge types:
     ('Package_Name', 'socket_port', 'Port'),
     ('Package_Name', 'socket_host', 'Hostnames'),
 
-
-
  '''
 
 import sys
@@ -115,6 +113,10 @@ def edges_process(edges:list, global_node_id_map, global_node_counter, data: Het
     }
 
     for edge in edges:
+        # [1] Check if source and target exist in global_node_id_map
+        if edge['target'] not in global_node_id_map:
+            print(f"[Warning] target node '{edge['target']}' not found in global_node_id_map")
+
         source_idx, global_node_id_map, global_node_counter = \
             get_or_add_node(edge['source'], global_node_id_map, global_node_counter)
         target_idx, global_node_id_map, global_node_counter = \

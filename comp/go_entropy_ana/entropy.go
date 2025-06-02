@@ -1,10 +1,10 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2025-04-04 17:14:43
- * @ Description: implement Pixie Random Walk with golang
+ * @ Modified time: 2025-06-02 10:47:03
+ * @ Description: implement Pixie Random Walk with Golang
  */
 
-package model
+package comp
 
 import (
 	"math/rand"
@@ -18,16 +18,17 @@ type Graph struct {
 	Edges map[string]map[string]Edge
 }
 
-// Node structure with value, type, and eco attributes
 type Node struct {
-	Type string // Node type (e.g. Path, Package_Name)
-	Eco string // Ecosystem type
+	Value string `json:"Value"`
+	Type  string `json:"Type"`
+	Eco   string `json:"Eco"`
 }
 
-// Edge Structure with source, target, value, and type
 type Edge struct {
-	Value interface{} // edge value (string or other types)
-	Type string
+	Source string      `json:"Source"`
+	Target string      `json:"Target"`
+	Value  interface{} `json:"Value"`
+	Type   string      `json:"Type"`
 }
 
 

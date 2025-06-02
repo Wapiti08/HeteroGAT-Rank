@@ -91,26 +91,10 @@ def get_max_size(file_path):
         data = pickle.load(fr)
 
     # Step 2: Initialize the variables to track max nodes and max edges
-    max_nodes_per_type = {}
     max_edges_per_type = {}
 
     # Step 3: Traverse through each subgraph to find the max nodes and edges
     for subgraph in data:
-        # traverse through nodes to find the max number of nodes for each type
-        nodes_df = pd.DataFrame(subgraph['nodes'])
-
-        if nodes_df.empty:
-            print("Warning: Empty nodes DataFrame in subgraph.")
-            continue
-
-        # calculate max nodes per type in the current subgraph
-        for node_type, node_data in nodes_df.groupby("type"):
-            num_nodes = len(node_data)
-            if node_type not in max_nodes_per_type:
-                max_nodes_per_type[node_type] = num_nodes
-            else:
-                max_nodes_per_type[node_type] = max(max_nodes_per_type[node_type], num_nodes)
-
         # convert edges to DataFrame
         edges_df = pd.DataFrame(subgraph['edges'])
         
@@ -127,10 +111,9 @@ def get_max_size(file_path):
                 max_edges_per_type[edge_type] = max(max_edges_per_type[edge_type], num_edges)
 
     # Step 4: Return the max nodes and edges per type
-    print("Max nodes per type:", max_nodes_per_type)
     print("Max edges per type:", max_edges_per_type)
 
-    return max_nodes_per_type, max_edges_per_type
+    return max_edges_per_type
 
 
 class LabeledSubGraphs(Dataset):
@@ -180,25 +163,28 @@ class LabeledSubGraphs(Dataset):
 
 
     @staticmethod
-    def pad_subgraph(subgraph, max_nodes_per_type, max_edges_per_type, target_feature_dim=400):
+    def pad_subgraph(subgraph, max_edges_per_type, target_feature_dim=400):
         """
         Pads the subgraph's node features and edge index to match the max_nodes
         :param subgraph: The subgraph (HeteroData) to pad
         :param max_num: the max number among max_nodes and max_edges
         :return: The padded subgraph
         """
-        for node_type, max_num in max_nodes_per_type.items():
-            # get node features
-            node_features = subgraph[node_type].x if node_type in  \
-                subgraph.node_types else sparsepad.sparse_zeros(max_num, target_feature_dim)
-            
-            if node_features.size(0) < max_num:
-                subgraph[node_type].x = sparsepad.sparse_padding_with_values(node_features, max_num, target_feature_dim)
 
         for edge_type, max_num in max_edges_per_type.items():
+            # padding edges
             for edge_type_tuple in edge_types:
                 # the middle element in tuple is edge_type
                 if edge_type == edge_type_tuple[1]:
+                    # padding nodes -- edge_type_tuple[2] is target node type
+                    node_type = edge_type_tuple[2]
+                    if node_type not in subgraph.node_types:
+                        subgraph[node_type].x = sparsepad.sparse_zeros(max_num, target_feature_dim)
+                    else:
+                        node_features = subgraph[node_type].x
+                        if node_features.size(0) < max_num:
+                            subgraph[node_type].x = sparsepad.sparse_padding_with_values(node_features, max_num, target_feature_dim)
+                    # padding edges
                     # Check if edge_type exists in the subgraph
                     if edge_type_tuple in subgraph.edge_types:
                         # If edge_type exists, use the existing edge_index
@@ -213,11 +199,6 @@ class LabeledSubGraphs(Dataset):
 
                     # cal necessary padding size
                     padding_size = max_num - num_edges
-
-                    # if padding_size <0:
-                    #     # if the num_edges exceeds max_num, adjust max_num
-                    #     max_num = adjust_max_num_if_needed(max_num, num_edges)
-                    #     padding_size = 0
 
                     if padding_size > 0:
                         # edge_index is [2, max_num]
@@ -241,7 +222,7 @@ class LabeledSubGraphs(Dataset):
         raw_path = osp.join(self.data_path.parent.parent.joinpath("data").as_posix(),\
                              "subgraphs.pkl")
         # get global max size in max_nodes and max_edges
-        max_nodes_per_type, max_edges_per_type = get_max_size(raw_path)
+        max_edges_per_type = get_max_size(raw_path)
         
         ray.shutdown()
 
@@ -286,7 +267,7 @@ class LabeledSubGraphs(Dataset):
                         global_node_counter = max(global_node_counter, local_counter)
 
                         # fill missing nodes and saved processed data
-                        processed_data = self.pad_subgraph(processed_data, max_nodes_per_type, max_edges_per_type)
+                        processed_data = self.pad_subgraph(processed_data, max_edges_per_type)
 
                         # Save the entire HeteroData object as a .pt file
                         torch.save(processed_data, osp.join(self.processed_dir, f'subgraph_{chunk_id}.pt'))

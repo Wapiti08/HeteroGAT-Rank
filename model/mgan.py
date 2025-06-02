@@ -23,12 +23,11 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 # predefined node types
-node_types = ["Path", "DNS Host", "Package_Name", "IP", "Command", "Port"]
+node_types = ["Path", "DNS Host", "Hostnames", "Package_Name", "IP", "Command", "Port"]
 
 if __name__ == "__main__":
 
-    data_path = Path.cwd().parent.joinpath("ext", "output", "processed")
-    # data_path = Path.cwd().parent.joinpath("ext", "output_map", "processed")
+    data_path = Path.cwd().parent.joinpath("ext", "new", "processed")
     print("Creating iterative dataset")
     # return a batch of 10 subgraphs based on saved format
     dataset = IterSubGraphs(root=data_path, batch_size = 1)
