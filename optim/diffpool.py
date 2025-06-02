@@ -133,8 +133,6 @@ class HeteroGNN(torch.nn.Module):
                     edge_index = edge_index.to(device)
                     x_input = x_input.float() # Ensures x is float32
                     # edge_index = edge_index.float()  # Ensures edge_index is int64
-                    print(x.shape, edge_index.shape)
-
                     node_features = self.node_type_encoders[node_type](x_input, edge_index)
 
                     # compute the assignment matrix for each node type (using softmax)

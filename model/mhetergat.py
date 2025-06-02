@@ -81,6 +81,8 @@ class MaskedHeteroGAT(torch.nn.Module):
             self.ln1[node_type] = LayerNorm(hidden_channels * num_heads)
             self.ln2[node_type] = LayerNorm(hidden_channels * num_heads)
 
+        self.pkgname_projector = torch.nn.Linear(400, 256)
+
         # diffpool layer for hierarchical feature aggregation
         self.hetero_gnn = diffpool.HeteroGNN(
             in_channels, hidden_channels, out_channels
@@ -190,19 +192,26 @@ class MaskedHeteroGAT(torch.nn.Module):
         # create the mapping from global indices to local indices
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
-        
                 
         # for debug
         # for node_type, x in x_dict_1.items():
         #     print(f"[x_dict_1] {node_type}: shape={x.shape}")
+
         x_dict = {}
-        # bypass the process for Package_Name
         for node_type, x in x_dict_1.items():
+            if node_type == "Package_Name":
+                # lower dimension from 400 to 256
+                x = self.pkgname_projector(x)  # Linear(400, 256)
+            
             if node_type in self.ln1 and x.shape[-1] == 256:
                 x_dict[node_type] = F.relu(self.ln1[node_type](x))
             else:
                 x_dict[node_type] = x
-        
+                        
+        # for debug
+        for node_type, x in x_dict.items():
+            print(f"[x_dict] {node_type}: shape={x.shape}")
+
         # ---- diffpool per node type, excluding "Package_Name"
         s_dict = self.hetero_gnn(x_dict, edge_index_dict)
 
@@ -212,13 +221,16 @@ class MaskedHeteroGAT(torch.nn.Module):
         
         # last attention weight calculation after pooling
         x_dict_2, attn_weights_pooled, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
+        
 
-        # apply layernorm and relu again
         x_dict = {}
-        # bypass the process for Package_Name
         for node_type, x in x_dict_2.items():
-            if node_type in self.ln1 and x.shape[-1] == 256:
-                x_dict[node_type] = F.relu(self.ln1[node_type](x))
+            if node_type == "Package_Name":
+                # lower dimension from 400 to 256
+                x = self.pkgname_projector(x)  # Linear(400, 256)
+            
+            if node_type in self.ln2 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln2[node_type](x))
             else:
                 x_dict[node_type] = x
 

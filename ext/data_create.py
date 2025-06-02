@@ -155,9 +155,9 @@ class LabeledSubGraphs(Dataset):
         return [f'batch_{i}.pt' for i in range(len(os.listdir(self.processed_dir)))]
 
     @staticmethod
-    def get_max_parallel_tasks(task_cpus = 1, utilization_ratio=0.98):
+    def get_max_parallel_tasks(task_cpus = 4, utilization_ratio=0.98):
         # there are 48 total available cpus
-        available = ray.available_resources().get("CPU", 32)  
+        available = ray.available_resources().get("CPU", 100)  
         usable = int(available * utilization_ratio)
         return max(1, usable // task_cpus)
 
@@ -213,7 +213,12 @@ class LabeledSubGraphs(Dataset):
                         # If edge_attr does not exist, create a new edge_attr filled with zeros
                         subgraph[edge_type_tuple].edge_attr = sparsepad.sparse_zeros_edges_attrs(max_num, 16)
                         print(f"Created new edge_attr for {edge_type_tuple} with zeros.")
-            
+
+        # ---- Set num_nodes explicitly after padding
+        for node_type in subgraph.node_types:
+            if getattr(subgraph[node_type], 'x', None) is not None:
+                subgraph[node_type].num_nodes = subgraph[node_type].x.size(0)
+
         return subgraph
         
 
@@ -255,7 +260,8 @@ class LabeledSubGraphs(Dataset):
             # Use ray.wait to wait for the tasks to finish, process them as they complete
             while batch_tasks:
                 # Wait for any task to finish (returns finished task and remaining tasks)
-                ready, remaining = ray.wait(batch_tasks, num_returns=1, timeout=5)
+                num_returns = min(10, len(batch_tasks))
+                ready, remaining = ray.wait(batch_tasks, num_returns=num_returns, timeout=5)
                 
                 for task in ready:
 
@@ -289,8 +295,8 @@ class LabeledSubGraphs(Dataset):
 
             # Increment chunk_id for the next batch
             chunk_id += 1
-            # force garbage collection
-            gc.collect() 
+            # force garbage collection --- for small size of available memory
+            # gc.collect() 
         
         # Shutdown Ray after processing
         ray.shutdown()

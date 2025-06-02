@@ -1,7 +1,7 @@
 ray[cgraph]!=2.44.*,>=2.43.0
 scikit-learn==1.6.0
 dask==2023.5.0
-torch==2.1.0
+torch==2.6.0
 torch-geometric==2.6.1
 torch-scatter==2.1.2
 torch-sparse==0.6.18

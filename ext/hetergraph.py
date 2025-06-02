@@ -94,10 +94,6 @@ def nodes_process(nodes:list, global_node_id_map, global_node_counter, data: Het
 
         node_indices.append(global_node_id)
 
-    # Set num_nodes explicitly
-    for node_type in data.node_types:
-        data[node_type].num_nodes = data[node_type].x.size(0)
-
     return data, global_node_id_map, global_node_counter
 
 

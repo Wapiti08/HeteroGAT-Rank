@@ -12,6 +12,6 @@ def gra_to_json(subgraphs, output_dir):
     ''' interface to convert subgraph pickle to json format
     
     '''
-    
+    for i, subgraph in enumerate()
 
 
