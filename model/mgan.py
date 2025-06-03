@@ -183,7 +183,7 @@ if __name__ == "__main__":
     top_k_nodes_by_eco = model1.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
     print(top_k_nodes_by_eco)
     # rank node globally
-    top_k_global_nodes = model1.rank_nodes_global(edge_index_map_pool, 10)
+    top_k_global_nodes = model1.rank_nodes_global(edge_atten_map_pool, 10)
     print(top_k_global_nodes)
     # final rank
     print(model1.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))

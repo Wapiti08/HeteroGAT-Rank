@@ -21,5 +21,32 @@ def gra_to_json(subgraphs, output_dir):
         # construct node_id: f"{eco}::{value}""
         ori_to_id = {}
 
-        
+        for ori_node in subgraph["nodes"]:
+            value = ori_node.get("value", "")
+            eco = ori_node.get("eco", "")
+            if value == "":
+                continue
+
+            # create unique node Id
+            node_id = f"{eco}::{value}"
+            ori_to_id[value] = node_id
+
+            graph_dict["Nodes"][node_id] = {
+                "Value": value,
+                "Type": ori_node.get("type", ""),
+                "Eco": eco
+            }
+
+        for edge in subgraph["edges"]:
+            src_val = edge["source"]
+            tgt_val = edge['target']
+
+            src = ori_to_id.get(src_val)
+            tgt = ori_to_id.get(tgt_val)
+
+            if not src or not tgt:
+                
+
+
+
 
