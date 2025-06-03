@@ -46,7 +46,7 @@ class MaskedHeteroGAT(torch.nn.Module):
             #  GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
             #              add_self_loops=False)
              GATv2Conv(
-                in_channels=(400, 400),  
+                in_channels=(-1, -1),  
                 out_channels=64,  
                 heads=num_heads,  
                 concat=True,  
@@ -62,7 +62,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         self.conv2 = HeteroConv(
             {et: 
              GATv2Conv(
-                in_channels=(400, 400),  
+                in_channels=(-1, -1),
                 out_channels=64,  
                 heads=num_heads,  
                 concat=True,  
@@ -101,7 +101,7 @@ class MaskedHeteroGAT(torch.nn.Module):
         # Classifier for binary classification (output of size 1), consider extra input for edge info
         self.classifier = LazyLinear(1)
 
-    def cal_attn_weight(self, conv_module, x_dict, edge_index_dict):
+    def cal_attn_weight(self, conv_module, x_dict, edge_index_dict, g2l_map):
         ''' Custom version of HeteroGonv that returns attention weights
         
         returns:
@@ -119,8 +119,6 @@ class MaskedHeteroGAT(torch.nn.Module):
         # create a dict to save edge_list with original node value
         edge_index_map = {}
 
-        # generate projection from global to local
-        g2l_map = global_to_local_map(x_dict, edge_index_dict)
 
         for edge_type, conv in conv_module.convs.items():
             src_type, _, tgt_type = edge_type
@@ -145,7 +143,6 @@ class MaskedHeteroGAT(torch.nn.Module):
                 edge_index = edge_index.coalesce().indices()
 
             local_edge_index = remap_edge_indices(edge_index, g2l_map, src_type, tgt_type)
-
 
             # shape of alpha is [num_edges, num_heads]
             out, (_, alpha) = conv((x_src, x_tgt), local_edge_index, return_attention_weights=True)
@@ -189,46 +186,51 @@ class MaskedHeteroGAT(torch.nn.Module):
 
         '''
         x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
-        # create the mapping from global indices to local indices
-        # ---- first conv with attention
-        x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
-                
-        # for debug
-        # for node_type, x in x_dict_1.items():
-        #     print(f"[x_dict_1] {node_type}: shape={x.shape}")
 
+        g2l_map = global_to_local_map(x_dict, edge_index_dict)
+
+        # ---- first conv with attention
+        x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict, g2l_map)
+
+        # apply layernorm, exclude Package_Name
         x_dict = {}
         for node_type, x in x_dict_1.items():
             if node_type == "Package_Name":
-                # lower dimension from 400 to 256
-                x = self.pkgname_projector(x)  # Linear(400, 256)
-            
+                if x.shape[-1] == 400:
+                    x = self.pkgname_projector(x)
+                x_dict[node_type] = x
+
             if node_type in self.ln1 and x.shape[-1] == 256:
                 x_dict[node_type] = F.relu(self.ln1[node_type](x))
             else:
                 x_dict[node_type] = x
-                        
-        # for debug
-        for node_type, x in x_dict.items():
-            print(f"[x_dict] {node_type}: shape={x.shape}")
 
+        # Step 4: Build global-to-local map (only for target nodes)
+        local_edge_index_dict = {
+                etype: remap_edge_indices(edge_index, g2l_map, etype[0], etype[2])
+                for etype, edge_index in edge_index_dict.items()
+            }
+        
         # ---- diffpool per node type, excluding "Package_Name"
-        s_dict = self.hetero_gnn(x_dict, edge_index_dict)
+        s_dict = self.hetero_gnn(x_dict, local_edge_index_dict)
 
         pooled_x_dict, pooled_adj_dict, link_loss, ent_loss = diffpool.hetero_diff_pool(
-                    x_dict, edge_index_dict, s_dict
+                    x_dict, local_edge_index_dict, s_dict
                 )
         
+        g2l_map_pooled = global_to_local_map(pooled_x_dict, pooled_adj_dict)
+
         # last attention weight calculation after pooling
-        x_dict_2, attn_weights_pooled, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict)
+        x_dict_2, attn_weights_pooled, edge_atten_map_2, edge_index_map_2 = self.cal_attn_weight(self.conv2, pooled_x_dict, pooled_adj_dict, g2l_map_pooled)
         
 
         x_dict = {}
         for node_type, x in x_dict_2.items():
             if node_type == "Package_Name":
-                # lower dimension from 400 to 256
-                x = self.pkgname_projector(x)  # Linear(400, 256)
-            
+                if x.shape[-1] == 400:
+                    x = self.pkgname_projector(x)
+                x_dict[node_type] = x
+                
             if node_type in self.ln2 and x.shape[-1] == 256:
                 x_dict[node_type] = F.relu(self.ln2[node_type](x))
             else:

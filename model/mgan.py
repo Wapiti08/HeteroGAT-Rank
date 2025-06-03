@@ -15,7 +15,7 @@ import os
 from sklearn.model_selection import train_test_split
 from utils import evals
 from model.hetergat import HeterGAT
-from model.mhetergat import MaskedHeteroGAT
+from model.dhetergat import MaskedHeteroGAT
 from torch_geometric.utils import to_dense_batch
 import json
 
@@ -149,7 +149,8 @@ if __name__ == "__main__":
     # Initialize model with required parameters
     model1 = MaskedHeteroGAT(
         # default is 400
-        in_channels= list(batch.num_node_features.values())[0],
+        # in_channels= list(batch.num_node_features.values())[0],
+        in_channels= 256,
         hidden_channels=64, 
         out_channels=64, 
         num_heads=4, 
@@ -168,7 +169,6 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
-            labels = batch.y.to(device)
 
             total_loss += loss.item()
             loss.backward()

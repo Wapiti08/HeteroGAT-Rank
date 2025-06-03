@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from typing import Optional, Tuple, Dict
 import torch.nn as nn
+import torch_sparse
 
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
@@ -60,31 +61,36 @@ def hetero_diff_pool(
             s = s * mask
 
         # pooled node features --- default two clusters
-        pooled_x = torch.matmul(s.transpose(1, 2), x)
+        pooled_x = torch.matmul(s.T, x)
         pooled_x_dict[node_type] = pooled_x
 
         # for each edge type, handle the adjacency matrix and pooling
         for edge_type, edge_index in edge_index_dict.items():
-            if edge_type.startswith(node_type):
-                # compute adj matrix for this edge type
-                adj = torch.zeros(x.size(0), x.size(1), x.size(1), device=x.device)
-                for i in range(x.size(0)):
-                    # assume directed edges
-                    adj[i, edge_index[0], edge_index[1]] = 1
+            src_type, _, tgt_type = edge_type
+            if src_type == node_type or tgt_type == node_type:
+                
+                x = x_dict[tgt_type]
+                s = torch.softmax(s_dict[src_type], dim=-1)
+                num_nodes = s.size(0)
 
-                # apply pooling to adj matrix
-                pooled_adj = torch.matmul(torch.matmul(s.transpose(1, 2),adj), s)
-                pooled_adj_dict[edge_type] = pooled_adj
+                # create sparse matrix
+                edge_weight = torch.ones(edge_index.size(1), device=s.device)
+                adj = torch.sparse_coo_tensor(edge_index, edge_weight, size=(num_nodes, num_nodes))
 
-                # link prediction loss
-                loss_loss += torch.norm(adj - torch.matmul(s, s.transpose(1,2)), p=2)
-        
+                try:
+                    pooled_adj = torch.sparse.mm(s.T, torch.sparse.mm(adj, s))  # (K, K)
+                    pooled_adj_dict[edge_type] = pooled_adj
+
+                    # link prediction loss
+                    link_loss += torch.norm(torch.sparse.mm(adj, s) - s, p=2)
+
+                except RuntimeError as e:
+                    print(f"[Warning] Skipped edge_type {edge_type} due to sparse.mm error: {e}")
+
         # entropy loss
         ent_loss += torch.sum(s * torch.log(s + 1e-6), dim=1).mean()
     
-    # normalize the link prediction loss
-    if normalize:
-        # numel is the number of edges in the graph
+    if normalize and len(pooled_adj_dict) > 0:
         link_loss = link_loss / sum([adj.numel() for adj in pooled_adj_dict.values()])
 
     return pooled_x_dict, pooled_adj_dict, link_loss, ent_loss
@@ -101,6 +107,7 @@ class HeteroGNN(torch.nn.Module):
         self.node_type_encoders = nn.ModuleDict()
 
         for node_type in node_types:
+            # if node_type != "Package_Name":
             # define the SAGEConv layer for each node type --- accept sparse matrix
             self.node_type_encoders[node_type] = SAGEConv(
                 in_channels, hidden_channels
@@ -110,6 +117,7 @@ class HeteroGNN(torch.nn.Module):
         self.pooling_layers = nn.ModuleDict()
 
         for node_type in node_types:
+            # if node_type != "Package_Name":
             # learnable transformation of node embeddings
             self.pooling_layers[node_type] = nn.Linear(out_channels, out_channels)
 
@@ -124,6 +132,8 @@ class HeteroGNN(torch.nn.Module):
 
         # process each node type and its corresponding edges
         for node_type, x in x_dict.items():
+            # if node_type == "Package_Name":
+            #     continue
             # Get the edge indices for each edge type involving this node type
             s = []
             for (src_node_type, edge_type, tgt_node_type), edge_index in edge_index_dict.items():
