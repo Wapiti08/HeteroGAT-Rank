@@ -12,6 +12,14 @@ def gra_to_json(subgraphs, output_dir):
     ''' interface to convert subgraph pickle to json format
     
     '''
-    for i, subgraph in enumerate()
+    for i, subgraph in enumerate(subgraphs):
+        graph_dict = {
+            "Nodes": {},
+            "Edges": {}
+        }
 
+        # construct node_id: f"{eco}::{value}""
+        ori_to_id = {}
+
+        
 

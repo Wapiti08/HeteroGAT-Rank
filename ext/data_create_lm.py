@@ -1,7 +1,7 @@
 '''
  # @ Create Time: 2024-12-18 09:27:11
  # @ Modified time: 2024-12-18 09:27:14
- # @ Description: create graph dataset suitable for GNN model training in pytorch in multiple steps, maximize the usage of resources
+ # @ Description: create graph dataset suitable for GNN model training in pytorch in multiple steps (reduce one-time memory cost)
  
 node: {
     'value': str content / numeric,
@@ -49,6 +49,12 @@ edge_types = [
         ]
 
 
+def load_in_chunks(file_path, chunk_size):
+    with open(file_path, 'rb') as fr:
+        data = pickle.load(fr)
+        # second round of generation
+        for i in range(0, len(data), chunk_size):
+            yield data[i:i+chunk_size]
 
 # def should_pause_for_memory(threshold_gb=128):
 #     used = psutil.virtual_memory().used / (1024**3)
@@ -72,6 +78,12 @@ def process_subgraphs(subgraph, global_node_id_map, global_node_counter):
 
     return data, global_node_id_map, global_node_counter
 
+# def adjust_max_num_if_needed(max_num, num_edges):
+#     ''' Adjust max_num if num_edges exceeds it '''
+#     if num_edges > max_num:
+#         max_num = num_edges
+#         print(f"Adjusted max_num to {max_num} to accommodate {num_edges} edges.")
+#     return max_num
 
 def get_max_size(file_path):
     # Step 1: Load the data from the pickle file
@@ -131,11 +143,6 @@ class LabeledSubGraphs(Dataset):
             return max(1, default_bs // 1.5)
         return default_bs
 
-    @staticmethod
-    def load_all_data(file_path):
-        with open(file_path, 'rb') as fr:
-            return pickle.load(fr)
-
     @property
     def raw_file_names(self):
         return ['subgraphs.pkl']
@@ -148,7 +155,7 @@ class LabeledSubGraphs(Dataset):
         return [f'batch_{i}.pt' for i in range(len(os.listdir(self.processed_dir)))]
 
     @staticmethod
-    def get_max_parallel_tasks(task_cpus = 2, utilization_ratio=0.98):
+    def get_max_parallel_tasks(task_cpus = 4, utilization_ratio=0.98):
         # there are 48 total available cpus
         available = ray.available_resources().get("CPU", 100)  
         usable = int(available * utilization_ratio)
@@ -230,79 +237,69 @@ class LabeledSubGraphs(Dataset):
 
         # initialize ray
         ray.init(
-            num_cpus=100,
             ignore_reinit_error=True, 
             runtime_env={"working_dir": Path.cwd().parent.as_posix(), \
                         "excludes": ["logs/", "*.pt", "*.json", "*.csv", "*.pkl"]})
-        
         # Global ID mapping
         global_node_id_map, global_node_counter, chunk_id = self.load_state()  
-        processed_files = set(self.processed_file_names)
+        processed_files = list(set(self.processed_file_names))
 
-        all_subgraphs = self.load_all_data(raw_path)
-
-        max_tasks = self.get_max_parallel_tasks()
-
-        for i in range(0, len(all_subgraphs), self.batch_size):
-            batch = all_subgraphs[i:i + self.batch_size]
-            task_refs = []
-            subgraph_file_map = {}
+        # process in chunks, like every 100 subgraphs every time in 9k
+        for batch in load_in_chunks(raw_path, self.batch_size):
+            batch_tasks = []
 
             for subgraph in batch:
                 # Skip processing if the subgraph has already been processed
                 subgraph_file = f'subgraph_{chunk_id}.pt'
                 if subgraph_file in processed_files:
-                    chunk_id += 1
                     continue
 
                 task = process_subgraphs.remote(subgraph, global_node_id_map, global_node_counter)  # Submit the task
-                task_refs.append(task)
-                subgraph_file_map[task] = subgraph_file
-                chunk_id += 1
+                batch_tasks.append(task)
 
-            # concurrency tasks, control the number of running tasks at same time
-            in_flight = []
-            results_handled = 0
+            # Use ray.wait to wait for the tasks to finish, process them as they complete
+            while batch_tasks:
+                # Wait for any task to finish (returns finished task and remaining tasks)
+                num_returns = min(10, len(batch_tasks))
+                ready, remaining = ray.wait(batch_tasks, num_returns=num_returns, timeout=5)
+                
+                for task in ready:
 
-            for task in task_refs:
-                in_flight.append(task)
+                    processed_data, local_node_map, local_counter = ray.get(task)
+                    
+                    if processed_data is not None:
+                        # update global node ID and counter
+                        global_node_id_map.update(local_node_map)
+                        global_node_counter = max(global_node_counter, local_counter)
 
-                while len(in_flight) >= max_tasks:
-                    ready, in_flight = ray.wait(in_flight, num_returns=1)
-                    self._handle_result(ready[0], subgraph_file_map[ready[0]],
-                                        global_node_id_map, global_node_counter,
-                                        processed_files, max_edges_per_type)
-                    results_handled += 1
+                        # fill missing nodes and saved processed data
+                        processed_data = self.pad_subgraph(processed_data, max_edges_per_type)
 
-            # wait remaining tasks                    
-            while in_flight:
-                ready, in_flight = ray.wait(in_flight, num_returns=1)
-                self._handle_result(ready[0], subgraph_file_map[ready[0]],
-                                    global_node_id_map, global_node_counter,
-                                    processed_files, max_edges_per_type)
-                results_handled += 1
+                        # Save the entire HeteroData object as a .pt file
+                        torch.save(processed_data, osp.join(self.processed_dir, f'subgraph_{chunk_id}.pt'))
 
+                        # track processed file
+                        processed_files.append(subgraph_file)
+
+                # Remove the tasks that have been processed
+                batch_tasks = remaining
+
+                # if should_pause_for_memory():
+                #     print("High memory usage. Pausing...")
+                #     gc.collect()
+                #     time.sleep(10)
+                        
+            # periodically save the state
             if chunk_id % self.checkpoint_interval == 0:
                 self.save_state(global_node_id_map, global_node_counter, chunk_id)
 
+            # Increment chunk_id for the next batch
+            chunk_id += 1
+            # force garbage collection --- for small size of available memory
+            # gc.collect() 
+        
+        # Shutdown Ray after processing
         ray.shutdown()
-    
-    def _handle_result(self, task_ref, subgraph_file, global_node_id_map, global_node_counter, \
-                       processed_files, max_edges_per_type):
-        try:
-            processed_data, local_node_map, local_counter = ray.get(task_ref)
-            if processed_data is None:
-                return
-
-            global_node_id_map.update(local_node_map)
-            global_node_counter = max(global_node_counter, local_counter)
-
-            processed_data = self.pad_subgraph(processed_data, max_edges_per_type)
-            torch.save(processed_data, osp.join(self.processed_dir, subgraph_file))
-            processed_files.add(subgraph_file)
-
-        except Exception as e:
-            print(f"[Error] Failed to handle result for {subgraph_file}: {e}")
 
     def save_state(self, global_node_id_map, global_node_counter, chunk_id):
         """ Save the global_node_id_map, global_node_counter, and chunk_id to disk """

@@ -68,7 +68,6 @@ def global_to_local_map(x_dict, edge_index_dict):
         global_to_local_map: a mapping from global node indices to local indices
     '''
     global_to_local_map = {}
-
     for edge_type, edge_index in edge_index_dict.items():
         src_type, _, tgt_type = edge_type
         num_src_nodes = x_dict[src_type].size(0)  # Local node count for source type
