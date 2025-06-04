@@ -1,42 +1,52 @@
 /**
  * @ Create Time: 2024-12-26 16:00:03
- * @ Modified time: 2025-06-03 14:03:04
+ * @ Modified time: 2025-06-04 14:35:34
  * @ Description: find malicious indicator in small-scale subgraphs
  */
 
 package main
 
 import (
-	"DDGRL/comp"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Main function to test the implementation
 func main() {
-	// Create the graph
-	g := &comp.Graph{}
+	var graphs []*LabeledGraph
+	
+	files, err := os.ReadDir("sample")
 
-	// Add nodes
-	g.AddNode("A", comp.Node{Type: "Package_Name", Eco: "npm"})
-	g.AddNode("B", comp.Node{Type: "Command", Eco: "pypi"})
-	g.AddNode("C", model.Node{Type: "IP", Eco: "ruby"})
-
-	// Add edges
-	g.AddEdge("A", "B", model.Edge{Value: "install", Type: "action"})
-	g.AddEdge("B", "C", model.Edge{Value: "resolve", Type: "DNS"})
-	g.AddEdge("C", "A", model.Edge{Value: "query", Type: "DNS"})
-
-	// Run Personalized PageRank
-	totalWalks := 10000
-	maxSteps := 5
-	numWorkers := 4
-	startNode := "A"
-
-	proximity := model.PixieRandomWalk(g, startNode, totalWalks, maxSteps, numWorkers)
-
-	// Print results
-	fmt.Println("Node Proximity Scores:")
-	for node, score := range proximity {
-		fmt.Printf("Node %s: %d\n", node, score)
+	if err != nil {
+		fmt.Println("Failed to read sample directory", err)
+		return
 	}
+
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		path := filepath.Join("sample", file.Name())
+		// load graph in json format
+		lg, err := LoadLabeledGraph(path, label)
+		if err != nil {
+			fmt.Println("Error loading:", path, err)
+			continue
+		}
+		graphs = append(graphs, lg)
+	}
+
+	os.MkdirAll("result", os.ModePerm)
+
+	nodeEnt := CountNodeValueEntropy(graphs)
+	SaveTopEntropy(nodeEnt, "result/top_node_entropy.csv", 50)
+
+	edgeEnt := CountEdgeValueEntropy(graphs)
+	SaveTopEntropy(edgeEnt, "result/top_edge_entropy.csv", 50)
+
+	fmt.Println("✅ Entropy analysis completed. Results in ./result")
+}
 }

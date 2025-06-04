@@ -1,151 +1,100 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2025-06-02 14:50:51
+ * @ Modified time: 2025-06-04 13:07:16
  * @ Description: implement Pixie Random Walk with Golang
  */
 
-package comp
+package main
 
 import (
-	"math/rand"
-	"sync"
-	"time"
+	"fmt"
+	"math"
+	"os"
+	"sort"
 )
 
 // Graph representation with edge weight
-type Graph struct {
-	Nodes map[string]Node
-	Edges map[string]map[string]Edge
-}
-
-type Node struct {
-	Value string `json:"Value"`
-	Type  string `json:"Type"`
-	Eco   string `json:"Eco"`
-}
-
-type Edge struct {
-	Source string      `json:"Source"`
-	Target string      `json:"Target"`
-	Value  interface{} `json:"Value"`
-	Type   string      `json:"Type"`
-}
-
-
-// AddNode adds a node to the graph
-func (g *Graph) AddNode(key string, node Node) {
-	if g.Nodes == nil {
-		g.Nodes = make(map[string]Node)
+func computeEntropy(counts map[int]int) float64 {
+	// implement the entropy calculation based on formula
+	total := 0
+	for _, v := range counts {
+		total += v
 	}
 
-	g.Nodes[key] = node
-}
-
-// AddEdge adds an edge to the graph
-func (g *Graph) AddEdge(source, target string, edge Edge) {
-	if g.Edges == nil {
-		g.Edges = make(map[string]map[string]Edge)
+	if total == 0 {
+		return 0.0
 	}
 
-	if g.Edges[source] == nil {
-		g.Edges[source] = make(map[string]Edge)
+	ent := 0.0
+	for _, v := range counts {
+		p := float64(v) / float64(total)
+		ent -= p * math.Log2(p)
 	}
 
-	g.Edges[source][target] = edge
+	return ent
 }
 
-
-// Worker function for random walks
-func randomWalkWorker(g *Graph, startNode string, numWalks int, maxSteps int, 
-	results chan map[string]int, wg *sync.WaitGroup) {
-	/*
-	:param startNode: starting node from random walk
-	:param numWalks: number of random walks from starting node
-	:param maxSteps: maximum number of steps allowed in each random walk
-	:param results: channel to save result from every process
-	*/
-	
-	// done decrements the wait group counter by one
-	defer wg.Done()
-
-	proximity := make(map[string]int)
-	src := rand.NewSource(time.Now().UnixNano())
-	rng := rand.New(src)
-
-	// iter from number of walks
-	for i:=0; i<numWalks; i++ {
-		currentNode := startNode
-		// iter from maxmium steps
-		for j:=0; j < maxSteps; j++ {
-			// calculate proximity of node
-
-			proximity[currentNode]++
-
-			// get neighbors
-			neighbors := g.Edges[currentNode]
-			if len(neighbors) == 0 {
-				break
+func CountNodeValueEntropy(graph []*LabeledGraph) map[string]float64 {
+	// create counts map to save results
+	counts := make(map[string]map[int]int)
+	for _, lg := range graphs {
+		for _, node := range lg.Graph.Nodes {
+			key := fmt.Sprintf("%s|%s|%s", node.Type, node.Eco, node.Value)
+			// check whether key exists before
+			if _, ok := counts[key];!ok {
+				counts[key] = make(map[int]int)
 			}
+			counts[key][lg.Label]++
 
-			// choose random ngb to walk
-			var nextNode string
-			n := rng.Intn(len(neighbors))
+		}
+	}
 
-			for neighbor := range neighbors {
-				if n==0 {
-					nextNode = neighbor
-					break
+	result := make(map[string]float64)
+	for val, labelCounts := range counts {
+		result[val] = computeEntropy(labelCounts)
+	}
+}
+
+func CountEdgeValueEntropy(graphs []*LabeledGraph) map[string]float64 {
+	counts := make(map[string]map[int]int)
+	for _, lg := range graphs {
+		for _, targetMap := range lg.Graph.Edges {
+			for _, edge := range targetMap {
+				key := fmt.Sprintf("%s|%v", edge.Type, edge.Value)
+				if _, ok := counts[key]; !ok {
+					counts[key] = make(map[int]int)
 				}
-				n--
+				counts[key][lg.Label]++
 			}
-			currentNode = nextNode
-
 		}
 	}
-	// Send local proximity results back to the main thread
-	results <- proximity
-
+	result := make(map[string]float64)
+	for val, labelCounts := range counts {
+		result[val] = computeEntropy(labelCounts)
+	}
+	return result
 }
 
-
-
-// PixieRandomWalk performs parallel random walks using goroutines
-func PixieRandomWalk(g *Graph, startNode string, totalWalks int, maxSteps int, 
-	numWorkers int) map[string]int {
-
-	results := make(chan map[string]int, numWorkers)
-	proximity := make(map[string]int)
-
-	var wg sync.WaitGroup
-
-	// calculate number of walks per worker
-	walksPerWorker := totalWalks / numWorkers
-	remainWalkers := totalWalks % numWorkers
-
-	for i:=0 ;i < numWorkers; i++ {
-		numWalks := walksPerWorker
-		if i < remainWalkers {
-			// distribute remainder among workers
-			numWalks ++
-		}
-
-		wg.Add(1)
-		randomWalkWorker(g, startNode, numWalks, maxSteps, results, &wg)
-
+func SaveTopEntropy(entropies map[string]float64, filePath string, topN int) error {
+	type pair struct {
+		Key string
+		Val float64
 	}
 
-	// close the results channel when all goroutines complete
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// aggregate results from all workers
-	for res := range results {
-		for node, count := range res {
-			proximity[node] += count
-		}
+	var sorted []pair
+	for k, v := range entropies {
+		sorted = append(sorted, pair{k,v})
 	}
+	// sort with a custom closure
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Val < sorted[j].Val
+	})
 
-	return proximity
+	// save to a file
+	f, err := os.Create(filePath)
+	
+
+
+
+
 }

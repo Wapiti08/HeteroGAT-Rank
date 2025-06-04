@@ -44,7 +44,28 @@ def gra_to_json(subgraphs, output_dir):
             src = ori_to_id.get(src_val)
             tgt = ori_to_id.get(tgt_val)
 
-            if not src or not tgt:
+            if src not in graph_dict["Nodes"] or tgt not in graph_dict["Nodes"]:
+                continue
+
+            if src not in graph_dict["Edges"]:
+                graph_dict["Edges"][src] = {}
+
+            graph_dict["Edges"][src][tgt] = {
+                "Source": src,
+                "Target": tgt,
+                "Value": edge.get("value", None),
+                "Type": edge.get("type", "")
+            }
+
+        graph_dict["Label"] = subgraph.get("label", 0)  
+        # save to JSON file
+        json_path = Path(output_dir).joinpath(f"subgraph_{i}.json")
+        with open(json_path, "w") as f_out:
+            json.dump(graph_dict, f_out, indent=2)
+    
+    print(f"✅ {len(subgraphs)} subgraphs converted with unique node IDs (eco::value) in: {output_dir}")
+
+
                 
 
 

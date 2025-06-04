@@ -100,13 +100,13 @@ def nodes_process(nodes:list, global_node_id_map, global_node_counter, data: Het
 def edges_process(edges:list, global_node_id_map, global_node_counter, data: HeteroData):
     # initialize the edge_index for individual edge_type
     edge_type_dict = {
-    ('Package_Name', 'DNS', 'DNS Host'): [],
-    ('Package_Name', 'Action', 'Path'): [],
-    ('Package_Name', 'CMD', 'Command'): [],
-    ('Package_Name', 'socket_ip', 'IP'): [],
-    ('Package_Name', 'socket_port', 'Port'): [],
-    ('Package_Name', 'socket_host', 'Hostnames'):[],
-    }
+            ('Package_Name', 'DNS', 'DNS Host'): [],
+            ('Package_Name', 'Action', 'Path'): [],
+            ('Package_Name', 'CMD', 'Command'): [],
+            ('Package_Name', 'socket_ip', 'IP'): [],
+            ('Package_Name', 'socket_port', 'Port'): [],
+            ('Package_Name', 'socket_host', 'Hostnames'):[],
+            }
 
     for edge in edges:
         # [1] Check if source and target exist in global_node_id_map
