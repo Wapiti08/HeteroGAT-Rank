@@ -1,3 +1,5 @@
 data/
 ext/output/
 imgs/
+comp/go_entropy_ana/result
+comp/go_entropy_ana/sample

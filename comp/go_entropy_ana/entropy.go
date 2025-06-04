@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2025-06-04 13:07:16
+ * @ Modified time: 2025-06-04 15:13:07
  * @ Description: implement Pixie Random Walk with Golang
  */
 
@@ -34,7 +34,7 @@ func computeEntropy(counts map[int]int) float64 {
 	return ent
 }
 
-func CountNodeValueEntropy(graph []*LabeledGraph) map[string]float64 {
+func CountNodeValueEntropy(graphs []*LabeledGraph) map[string]float64 {
 	// create counts map to save results
 	counts := make(map[string]map[int]int)
 	for _, lg := range graphs {
@@ -53,6 +53,8 @@ func CountNodeValueEntropy(graph []*LabeledGraph) map[string]float64 {
 	for val, labelCounts := range counts {
 		result[val] = computeEntropy(labelCounts)
 	}
+
+	return result
 }
 
 func CountEdgeValueEntropy(graphs []*LabeledGraph) map[string]float64 {
@@ -92,9 +94,17 @@ func SaveTopEntropy(entropies map[string]float64, filePath string, topN int) err
 
 	// save to a file
 	f, err := os.Create(filePath)
-	
+	if err != nil {
+		return err
+	}
 
+	defer f.Close()
 
+	fmt.Fprintf(f, "Item, Entropy \n")
 
+	for i:=0; i<topN && i <len(sorted); i++ {
+		fmt.Fprintf(f, "%s,%.4f\n", sorted[i].Key, sorted[i].Val)
+	}
+	return nil
 
 }

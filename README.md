@@ -2,6 +2,7 @@
 distributed differential graph representation learning for malicious indicators identification 
 
 ![Python](https://img.shields.io/badge/Python3-3.10-brightgreen.svg) 
+![Golang](https://img.shields.io/badge/Go1.22.2-brightblue.svg) 
 
 ## Environment Setting Up:
 
@@ -51,7 +52,7 @@ distributed differential graph representation learning for malicious indicators 
     ```
     sudo apt-get install libffi-dev # avoid _ctypes error
     sudo apt-get install libbz2-dev # avoid _bz2 error
-
+    sudo apt install golang-go
 
     ```
 
@@ -86,12 +87,31 @@ distributed differential graph representation learning for malicious indicators 
 
         left node attr: {Types} in list
 
+## How to use
+
+- data generation:
+```
+python3 data_create.py
+```
+
+- graph analysis:
+```
+python3 mgan.py
+```
+
+- entropy analysis:
+```
+go run *.go
+
+```
+
+
+
 ## Graph Feature 
 
 - For consistency, the number of node and edge should be aligned
     ```
-    Max nodes per type: {'Command': 2837, 'DNS Host': 7, 'Hostnames': 7, 'IP': 79, 'Package_Name': 1, 'Path': 165142, 'Port': 6}
-    Max edges per type: {'Action': 165145, 'CMD': 2837, 'DNS': 7, 'socket_host': 7, 'socket_ip': 79, 'socket_port': 6}
+    Max edges per type: {'Action': 128781, 'CMD': 2837, 'DNS': 7, 'socket_host': 7, 'socket_ip': 79, 'socket_port': 6}
     ```
 
 

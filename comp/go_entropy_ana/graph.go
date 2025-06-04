@@ -40,7 +40,7 @@ type GraphFile struct {
 }
 
 
-func LoadLabeledGraph(filePath string, label int) (*LabeledGraph, error) {
+func LoadLabeledGraph(filePath string) (*LabeledGraph, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func LoadLabeledGraph(filePath string, label int) (*LabeledGraph, error) {
 
 	var gf GraphFile
 	// read graph in json format
-	err = json.Unmarshal(data, &g)
+	err = json.Unmarshal(data, &gf)
 	if err != nil {
 		return nil, err
 	}
