@@ -1,3 +1,8 @@
+'''
+ # @ Create Time: 2025-05-11 14:58:00
+ # @ Modified time: 2025-05-11 14:58:09
+ # @ Description: implement version with constractive loss
+ '''
 import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
@@ -19,7 +24,7 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 
-class DiffHeteroGAT(torch.nn.Module):
+class PNHeteroGAT(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_heads, processed_dir):
         '''
         args:
@@ -30,7 +35,7 @@ class DiffHeteroGAT(torch.nn.Module):
             num_edges: the number of edges in a batch
             num_nodes: the number of nodes in a batch
         '''
-        super(DiffHeteroGAT, self).__init__()
+        super(PNHeteroGAT, self).__init__()
 
         self.edge_types = [
             ('Package_Name', 'Action', 'Path'),
@@ -247,13 +252,16 @@ class DiffHeteroGAT(torch.nn.Module):
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
         logits = self.classifier(graph_embed).squeeze(-1)
         
-        # compute composite loss
-        loss = self.loss_fn(
+        # compute composite loss --- loss is a dict type
+        loss_dict = self.loss_fn(
             classification_loss=F.binary_cross_entropy_with_logits(logits, batch.y.float()),
-            attn_weights=attn_weights_2
+            attn_weights=attn_weights_2,
+            graph_embeds=graph_embed,
+            labels = batch.y.float(),
+            return_details=True  
         )
 
-        return logits, loss, attn_weights_2, edge_atten_map_2, edge_index_map_2
+        return logits, loss_dict['total'], attn_weights_2, edge_atten_map_2, edge_index_map_2
     
     
     def evaluate(self, logits, batch, threshold=0.5):

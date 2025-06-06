@@ -34,12 +34,12 @@ def rank_edges(atten_weights, edge_index_map, k:int, noise_factor:float):
     '''
     top_k_edges = {}
 
+    top_k_edges_indices = {edge_type: [] for edge_type in atten_weights}
     for edge_type, weights in atten_weights.items():
         if edge_type not in edge_index_map:
             print(f"Warning: {edge_type} not found in edge_index_map. Skipping.")
-            top_k_edges[edge_type] = []
             continue
-
+        # weights is a tensor of shape (num_edges, num_heads)
         # Compute the mean attention weight for each edge across all heads
         mean_weights = weights.mean(dim=1).to(device)  # shape: [num_edges]
 
@@ -54,31 +54,29 @@ def rank_edges(atten_weights, edge_index_map, k:int, noise_factor:float):
         # select the top k edges 
         top_k_edge_indices = sorted_indices[:k]
 
-        edge_list = edge_index_map[edge_type]
-        selected = []
+        # get the corresponding edge
+        top_k_edge_for_type = top_k_edge_indices.tolist()
 
-        for i in top_k_edge_indices:
-            i = i.item()
-            if i < len(edge_list):
-                # tuple: ((src, tgt), score)
-                selected.append((edge_list[i], round(mean_weights[i].item(), 4)))  
+        # add the selected top k edges for the current edge type
+        top_k_edges_indices[edge_type] = top_k_edge_for_type
 
-        top_k_edges[edge_type] = selected
+    top_k_edges = {}
 
+    for edge_type in atten_weights.keys():
+        if edge_type not in top_k_edges_indices:
+            # If edge_type was skipped earlier, assign an empty list
+            top_k_edges[edge_type] = []
+            continue
+
+        edge_list = edge_index_map.get(edge_type, [])
+        selected_edges = [edge_list[i] for i in top_k_edges_indices[edge_type] if i < len(edge_list)]
+        top_k_edges[edge_type] = selected_edges
+    
     return top_k_edges
 
-
 def rank_nodes_by_eco_system(edge_atten_map, node_json:list, k):
-    ''' Rank target nodes by aggregated attention per eco-system (based on source node's eco)
-
-    params:
-        edge_attn_map: dict {(src_node_value, tgt_node_value): attention_score }
-        node_json: list of node dict
-        k: num of top tgt nodes to keep per eco-system
+    ''' Rank target nodes (tgt_node_value) by eco_system consideration
     
-    returns:
-        dict {eco_system: List[Tuple[tgt_node_value, score]]}
-
     '''
     # Create a dictionary to store attention scores by eco_system and tgt_node_value
     eco_system_rank_map = defaultdict(lambda: defaultdict(float))
@@ -92,6 +90,7 @@ def rank_nodes_by_eco_system(edge_atten_map, node_json:list, k):
         if len(src_node_eco) == 0:
             continue  # Skip if eco_system for source node is not found
         src_node_eco = src_node_eco[0]  # Assuming the eco_system is unique for each node
+
         # Aggregate attention score by eco_system for tgt_node_value
         eco_system_rank_map[src_node_eco][tgt_node_value] += attn_weight
 
@@ -99,21 +98,12 @@ def rank_nodes_by_eco_system(edge_atten_map, node_json:list, k):
     top_k_by_eco_system = {}
     for eco_system, tgt_nodes in eco_system_rank_map.items():
         sorted_tgt_nodes = sorted(tgt_nodes.items(), key=lambda x: x[1], reverse=True)
-        top_k_by_eco_system[eco_system] = [(node, round(score, 4)) for node, score in sorted_tgt_nodes[:k]]
+        top_k_by_eco_system[eco_system] = [node for node, score in sorted_tgt_nodes[:k]]
 
     return top_k_by_eco_system
 
-
 def rank_nodes_global(edge_atten_map, k):
-    ''' Rank target nodes globally by their total attention score.
-
-    params:
-        edge_atten_map: dict {(src_node_value, tgt_node_value): attention_score}
-        k: number of top target nodes to return
-    
-    reutrns:
-        list of (tgt_node_value, score)
-    '''
+    ''' Rank target nodes (tgt_node_value) without considering eco_system '''
 
     # Create a dictionary to store aggregated attention scores for each target node
     tgt_node_rank_map = defaultdict(float)
@@ -125,42 +115,46 @@ def rank_nodes_global(edge_atten_map, k):
     # Sort the target nodes by their aggregated attention scores
     sorted_tgt_nodes = sorted(tgt_node_rank_map.items(), key=lambda x: x[1], reverse=True)
     
-    return [(node, round(score, 4)) for node, score in sorted_tgt_nodes[:k]]
+    # Get the top k target nodes globally
+    top_k_global_nodes = [node for node, score in sorted_tgt_nodes[:k]]
+
+    return top_k_global_nodes
 
 def final_sample(top_k_edges, top_k_nodes_by_eco, top_k_global_nodes):
     '''
-    Final intersection sampling of nodes and edges, combining eco-system and global rankings.
+    Final sampling that returns actual node and edge values
     Params:
-        top_k_edges: dict {edge_type: List[((src, tgt), score)]}
-        top_k_nodes_by_eco: dict {eco: List[(tgt, score)]}
-        top_k_global_nodes: List[(tgt, score)]
-
+        atten_weights: dict[edge_type -> Tensor[num_edges, num_heads]]
+        edge_atten_map: dict[(src_node_value, tgt_node_value) -> attn_score]
+        edge_index_map: dict[edge_type -> List[(src_node_value, tgt_node_value)]]
+        node_json: list of node dicts with keys including 'value' and 'eco'
+        k: top-k value
+        noise_factor: float for tie-breaking
     Returns:
-        dict with:
-            - top_k_edges: same as input
-            - top_k_nodes_by_eco: same as input
-            - top_k_global_nodes: same as input
-            - final_selected_nodes: List of nodes
-            - final_selected_edges: dict {edge_type: List[((src, tgt), score)]}    
+        dict with top-k edges/nodes in original value form
     '''
 
-    selected_nodes = set([node for node, _ in top_k_global_nodes])
-    for node_list in top_k_nodes_by_eco.values():
-        selected_nodes.update([node for node, _ in node_list])
+    # step4: final sample - intersect results
+    final_selected_nodes = set(top_k_global_nodes)
 
-    final_selected_edges = {}
+    for eco_nodes in top_k_nodes_by_eco.values():
+        final_selected_nodes.update(eco_nodes)
+    
+    final_select_edges = {}
     for edge_type, edge_list in top_k_edges.items():
+        # filter edges that connect to selected target nodes
         filtered = [
-            ((src, tgt), score)
-            for ((src, tgt), score) in edge_list
-            if src in selected_nodes or tgt in selected_nodes
+            (src, tgt)
+            for (src, tgt) in edge_list
+            if tgt in final_selected_nodes or src in final_selected_nodes
         ]
-        final_selected_edges[edge_type] = filtered
+        final_select_edges[edge_type] = filtered
 
     return {
-        'top_k_edges': top_k_edges,
-        'top_k_nodes_by_eco': top_k_nodes_by_eco,
-        'top_k_global_nodes': top_k_global_nodes,
-        'final_selected_nodes': list(selected_nodes),
-        'final_selected_edges': final_selected_edges
+    'top_k_edges': top_k_edges,
+    'top_k_nodes_by_eco': top_k_nodes_by_eco,
+    'top_k_global_nodes': top_k_global_nodes,
+    'final_selected_nodes': list(final_selected_nodes),
+    'final_selected_edges': final_select_edges
     }
+

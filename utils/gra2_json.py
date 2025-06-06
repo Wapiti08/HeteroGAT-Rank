@@ -69,7 +69,7 @@ def gra_to_json(subgraphs, output_dir):
 if __name__ == "__main__":
     data_path = Path.cwd().parent.joinpath("data", "subgraphs.pkl")
     with data_path.open("rb") as fr:
-        subgraphs = pickle.load(fr)[:100]      
+        subgraphs = pickle.load(fr)[:50]      
 
     output_dir = Path.cwd().parent.joinpath("comp", "go_entropy_ana", "sample")
     gra_to_json(subgraphs, output_dir)
