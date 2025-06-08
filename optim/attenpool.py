@@ -53,7 +53,7 @@ class MultiTypeAttentionPooling(nn.Module):
 
 
 class MultiTypeEdgePooling(nn.Module):
-    def __init__(self, edge_attr_dim: int, hidden_dim: int = 64, dropout: float = 0.1 ):
+    def __init__(self, edge_attr_dim: int, hidden_dim: int = 64, dropout: float = 0.1):
         super().__init__()
         self.edge_attn_mlp = nn.Sequential(
             nn.Linear(edge_attr_dim, hidden_dim),

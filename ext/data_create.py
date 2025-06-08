@@ -337,7 +337,7 @@ class LabeledSubGraphs(Dataset):
         return len(self.processed_file_names)
 
     def get(self, idx):
-        batch = torch.load(osp.join(self.processed_dir, f'batch_{idx}.pt'))
+        batch = torch.load(osp.join(self.processed_dir, f'subgraph_{idx}.pt'))
         return batch
 
 

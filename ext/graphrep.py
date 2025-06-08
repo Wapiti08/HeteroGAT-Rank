@@ -16,7 +16,7 @@
     "type": Action (Path)| DNS (DNS Host) | CMD (Command) | Socket (IP, Port, Hostnames)
 
  }
- 
+
  
  '''
 

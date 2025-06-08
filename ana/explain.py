@@ -18,21 +18,31 @@ def compute_edge_import(attn_weights: Dict[str, torch.Tensor],
     """
     edge_score_map = {}
 
-    if logits.dim() > 1:
+    if logits.numel() == 1:
+        logits = logits.squeeze()
+    elif logits.dim() == 2:
         logits = logits[:, target_class].sum()
-    else:
+    elif logits.dim() == 1:
         logits = logits[target_class]
     
-    logits.backward(retain_graph=True)
+    # collect leaf tensors for gradient
+    leaf_attn_weights = {k: v.clone().detach().requires_grad_(True) for k, v in attn_weights.items()}
 
-    for edge_type, weights in attn_weights.items():
-        if weights.grad is None:
+    # re-run logit computation using new tensors (optional if logit is detached from attention)
+    grads = torch.autograd.grad(
+        outputs=logits,
+        inputs=list(leaf_attn_weights.values()),
+        retain_graph=True,
+        allow_unused=True
+    )
+
+    for (edge_type, w), g in zip(leaf_attn_weights.items(), grads):
+        if g is None:
             print(f"[Warning] No gradient for edge_type={edge_type}")
             continue
-        
-        grad = weights.grad
-        mean_weights = weights.mean(dim=1)
-        mean_grad = grad.mean(dim=1)
+
+        mean_weights = w.mean(dim=1)
+        mean_grad = g.mean(dim=1)
 
         importance = (mean_weights * mean_grad).abs()
         edge_list = edge_index_map.get(edge_type, [])
