@@ -3,6 +3,11 @@ import xgboost as xgb
 import shap
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+from pathlib import Path
+
+data_path = Path.cwd().parent.joinpath("corr_ana", "corr_matrix.csv")
+
+features_df = pd.read_csv(data_path)
 
 # ---- STEP 1: Prepare data ----
 # Assume `features_df` already exists and contains 'Label'

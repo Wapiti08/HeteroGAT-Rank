@@ -25,6 +25,9 @@ def correlation_analysis(df, label_column='Label', method='pearson', visualize=T
         plt.tight_layout()
         plt.show()
 
+    # save corr_matrix to csv
+    corr_matrix.to_csv(Path.cwd().joinpath("corr_matrix.csv"))
+
     return corr_matrix
 
 if __name__ == "__main__":

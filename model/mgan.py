@@ -150,90 +150,90 @@ if __name__ == "__main__":
 
     # torch.save(model2.state_dict(), "heterogat_model_state.pth")
 
-    print("Training DiffHeteroGAT ...")
-    batch = next(iter(train_loader))
+    # print("Training DiffHeteroGAT ...")
+    # batch = next(iter(train_loader))
 
-    # Initialize model with required parameters
-    model1 = DiffHeteroGAT(
-        # default is 400
-        # in_channels= list(batch.num_node_features.values())[0],
-        # in_channels= 256,
-        hidden_channels=64, 
-        edge_attr_dim=16, 
-        num_heads=4, 
-        processed_dir=data_path
-    ).to(device)
+    # # Initialize model with required parameters
+    # model1 = DiffHeteroGAT(
+    #     # default is 400
+    #     # in_channels= list(batch.num_node_features.values())[0],
+    #     # in_channels= 256,
+    #     hidden_channels=64, 
+    #     edge_attr_dim=16, 
+    #     num_heads=4, 
+    #     processed_dir=data_path
+    # ).to(device)
 
-    optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
+    # optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
-    # define the starting time
-    start_time = datetime.now()
-    for epoch in range(num_epochs):
-        total_loss = 0
-        for batch in train_loader:
+    # # define the starting time
+    # start_time = datetime.now()
+    # for epoch in range(num_epochs):
+    #     total_loss = 0
+    #     for batch in train_loader:
             
-            batch=batch.to(device)
+    #         batch=batch.to(device)
 
-            optimizer.zero_grad()
-            logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
+    #         optimizer.zero_grad()
+    #         logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
 
-            total_loss += loss.item()
-            loss.backward()
-            optimizer.step()
+    #         total_loss += loss.item()
+    #         loss.backward()
+    #         optimizer.step()
 
-        print(f"For MaskedHeteroGAT Model: Epoch {epoch+1}, Loss: {total_loss / len(train_loader)}")
+    #     print(f"For MaskedHeteroGAT Model: Epoch {epoch+1}, Loss: {total_loss / len(train_loader)}")
 
-    # rank last conv_weight_dict
-    top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
-    print("top k edges are:", top_k_edges)
-    # rank node by eco system
-    top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
-    print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
-    # rank node globally
-    top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
-    print("top global k edges are:", top_k_global_nodes)
-    # final rank
-    print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
+    # # rank last conv_weight_dict
+    # top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
+    # print("top k edges are:", top_k_edges)
+    # # rank node by eco system
+    # top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
+    # print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
+    # # rank node globally
+    # top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
+    # print("top global k edges are:", top_k_global_nodes)
+    # # final rank
+    # print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-    edge_score_map = explain.compute_edge_import(attn_weights_pooled, edge_index_map_pool, logits, target_class=1)
-    print("edge score map is:", edge_score_map)
-    node_score_map = explain.compute_node_import(edge_score_map)
-    print("node score map is:", edge_score_map)
+    # edge_score_map = explain.compute_edge_import(attn_weights_pooled, edge_index_map_pool, logits, target_class=1)
+    # print("edge score map is:", edge_score_map)
+    # node_score_map = explain.compute_node_import(edge_score_map)
+    # print("node score map is:", edge_score_map)
 
 
-    # --- Evaluation -----
-    model1.eval()
-    all_logits = []
-    all_labels = []
+    # # --- Evaluation -----
+    # model1.eval()
+    # all_logits = []
+    # all_labels = []
 
-    with torch.no_grad():
-        for batch in test_loader:
-            batch = batch.to(next(model1.parameters()).device)
-            logits, _, _, _ ,_ = model1(batch)
-            all_logits.append(logits)
-            all_labels.append(batch['label'])
+    # with torch.no_grad():
+    #     for batch in test_loader:
+    #         batch = batch.to(next(model1.parameters()).device)
+    #         logits, _, _, _ ,_ = model1(batch)
+    #         all_logits.append(logits)
+    #         all_labels.append(batch['label'])
     
-    # Concatenate
-    all_logits = torch.cat(all_logits)
-    all_labels = torch.cat(all_labels)
+    # # Concatenate
+    # all_logits = torch.cat(all_logits)
+    # all_labels = torch.cat(all_labels)
 
-    # Compute metrics
-    metrics = model1.evaluate(all_logits, all_labels)
+    # # Compute metrics
+    # metrics = model1.evaluate(all_logits, all_labels)
 
-    print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
+    # print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
 
-    model1.plot_metrics(
-        all_labels,
-        torch.sigmoid(all_logits).cpu().numpy(),
-        metrics)
+    # model1.plot_metrics(
+    #     all_labels,
+    #     torch.sigmoid(all_logits).cpu().numpy(),
+    #     metrics)
 
-    time_spent = datetime.now() - start_time
-    hours, remainder = divmod(time_spent.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    print(f"Time spent for DiffHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
+    # time_spent = datetime.now() - start_time
+    # hours, remainder = divmod(time_spent.total_seconds(), 3600)
+    # minutes, seconds = divmod(remainder, 60)
+    # print(f"Time spent for DiffHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
-    # save the model after training
-    torch.save(model1.state_dict(), "diff_heterogat_model.pth")
+    # # save the model after training
+    # torch.save(model1.state_dict(), "diff_heterogat_model.pth")
 
     print("-----------------------------------------------")
     print("Training PNHeteroGAT ...")

@@ -250,6 +250,7 @@ class PNHeteroGAT(torch.nn.Module):
 
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
+
         logits = self.classifier(graph_embed).squeeze(-1)
         # align with the shape
         if logits.dim() == 0:
@@ -258,7 +259,8 @@ class PNHeteroGAT(torch.nn.Module):
             label = batch.label.unsqueeze(0)
         else:
             label = batch.label
-            
+        
+        print(graph_embed.shape, logits.shape, label.shape)
         # compute composite loss --- loss is a dict type
         loss_dict = self.loss_fn(
             cls_loss=F.binary_cross_entropy_with_logits(logits, label.float()),
