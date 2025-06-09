@@ -17,6 +17,9 @@ import hashlib
 from torch_geometric.data import HeteroData
 from pathlib import Path
 from collections import defaultdict
+from typing import Tuple
+from multiprocessing import Pool, cpu_count
+
 
 def tensor_to_numpy(tensor):
     if tensor.is_sparse:
@@ -24,6 +27,16 @@ def tensor_to_numpy(tensor):
     if tensor.requires_grad:
         tensor = tensor.detach()
     return tensor.cpu().numpy()
+
+
+def process_file_for_hash(filepath: str) -> Tuple[str, str]:
+    try:
+        data = torch.load(filepath, map_location="cpu", weights_only=False)
+        h = hash_heterodata(data)
+        return (filepath, h)
+    except Exception as e:
+        print(f"Failed to load {filepath}: {e}")
+        return (filepath, None)
 
 def hash_heterodata(data: HeteroData) -> str:
     m = hashlib.sha256()
@@ -62,33 +75,51 @@ def hash_heterodata(data: HeteroData) -> str:
 
     return m.hexdigest()
 
-def find_duplicates_by_content(directory):
+
+def find_duplicates_by_content_parallel(directory: str, num_workers: int = None):
+    if num_workers is None:
+        num_workers = min(cpu_count(), 32)  # 避免线程爆炸
+
+    # 构造所有待处理的文件路径
+    file_list = [
+        os.path.join(directory, fname)
+        for fname in os.listdir(directory)
+        if fname.startswith("subgraph") and fname.endswith(".pt")
+    ]
+
     seen = {}
     duplicates = []
 
-    for filename in sorted(os.listdir(directory)):
-        if filename.startswith("subgraph") and filename.endswith(".pt"):
-            path = os.path.join(directory, filename)
-            try:
-                data = torch.load(path, map_location="cpu",weights_only=False)
-                h = hash_heterodata(data)
-                if h in seen:
-                    duplicates.append((filename, seen[h]))
-                else:
-                    seen[h] = filename
-            except Exception as e:
-                print(f"Failed to load {filename}: {e}")
-    
+    # 多进程并行计算 hash
+    with Pool(processes=num_workers) as pool:
+        results = pool.map(process_file_for_hash, file_list)
+
+    for filepath, h in results:
+        if h is None:
+            continue
+        fname = os.path.basename(filepath)
+        if h in seen:
+            duplicates.append((fname, os.path.basename(seen[h])))
+        else:
+            seen[h] = filepath
+
     print(f"\n🔁 Found {len(duplicates)} duplicates.")
     return duplicates
 
-def remove_duplicates_by_content(directory):
-    duplicates = find_duplicates_by_content(directory)
+
+def remove_duplicates_by_content_parallel(directory: str):
+    duplicates = find_duplicates_by_content_parallel(directory)
     for dup, original in duplicates:
         print(f"🗑 Removing duplicate {dup} (duplicate of {original})")
         os.remove(os.path.join(directory, dup))
 
 # Example usage:
 if __name__ == "__main__":
+
+    import multiprocessing as mp
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""  # only for this script
+
+    mp.set_start_method("spawn", force=True) 
+
     data_path = Path.cwd().parent.joinpath("ext", "new", "processed").as_posix()
-    remove_duplicates_by_content(data_path)
+    remove_duplicates_by_content_parallel(data_path)

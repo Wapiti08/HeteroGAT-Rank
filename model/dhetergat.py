@@ -20,7 +20,7 @@ device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 
 class DiffHeteroGAT(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_heads, processed_dir):
+    def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir):
         '''
         args:
             in_channels: the dimensionality of the input node features
@@ -85,7 +85,8 @@ class DiffHeteroGAT(torch.nn.Module):
         self.pkgname_projector = torch.nn.Linear(400, 256)
         # define attention pool for node and edge
         self.node_pool = attenpool.MultiTypeAttentionPooling(in_dim=256)
-        self.edge_pool = attenpool.MultiTypeEdgePooling(edge_attr_dim=num_heads)
+
+        self.edge_pool = attenpool.MultiTypeEdgePooling(edge_attr_dim=edge_attr_dim)
 
         node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
         
@@ -240,16 +241,23 @@ class DiffHeteroGAT(torch.nn.Module):
         node_pool = self.node_pool(x_dict_target)
 
         # ---- Final edge pooling using attention weights
-        edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
-        edge_pool = self.edge_pool(edge_avg_attr)
+        # edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
+        edge_pool = self.edge_pool(edge_attr_dict)
 
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
         logits = self.classifier(graph_embed).squeeze(-1)
-        
+        # align with the shape
+        if logits.dim() == 0:
+            logits = logits.unsqueeze(0)
+        if batch.label.dim() == 0:
+            label = batch.label.unsqueeze(0)
+        else:
+            label = batch.label
+
         # compute composite loss
         loss = self.loss_fn(
-            classification_loss=F.binary_cross_entropy_with_logits(logits, batch.y.float()),
+            cls_loss=F.binary_cross_entropy_with_logits(logits, label.float()),
             attn_weights=attn_weights_2
         )
 
@@ -271,7 +279,6 @@ class DiffHeteroGAT(torch.nn.Module):
 
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
-
 
     def agg_edge_features(self, edge_attr_dict):
         ''' aggregate edge attribute globally
