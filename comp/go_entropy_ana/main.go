@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 16:00:03
- * @ Modified time: 2025-06-04 15:13:22
+ * @ Modified time: 2025-06-10 15:58:17
  * @ Description: find malicious indicator in small-scale subgraphs
  */
 
@@ -11,16 +11,37 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/shirou/gopsutil/v3/cpu"
 )
 
 // Main function to test the implementation
 func main() {
-	var graphs []*LabeledGraph
-	
-	files, err := os.ReadDir("sample")
+	start := time.Now()
 
+	// Measure CPU usage in a separate goroutine
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				percent, _ := cpu.Percent(time.Second, false)
+				if len(percent) > 0 {
+					fmt.Printf("🧠 CPU Usage: %.2f%%\n", percent[0])
+				}
+			}
+		}
+	}()
+
+	var graphs []*LabeledGraph
+
+	files, err := os.ReadDir("sample")
 	if err != nil {
 		fmt.Println("Failed to read sample directory", err)
+		close(done)
 		return
 	}
 
@@ -30,7 +51,6 @@ func main() {
 		}
 
 		path := filepath.Join("sample", file.Name())
-		// load graph in json format
 		lg, err := LoadLabeledGraph(path)
 		if err != nil {
 			fmt.Println("Error loading:", path, err)
@@ -47,5 +67,18 @@ func main() {
 	edgeEnt := CountEdgeValueEntropy(graphs)
 	SaveTopEntropy(edgeEnt, "result/top_edge_entropy.csv", 50)
 
+	close(done)
+
 	fmt.Println("✅ Entropy analysis completed. Results in ./result")
+	fmt.Printf("⏱ Time elapsed: %v\n", time.Since(start))
 }
+
+
+
+
+
+
+
+
+
+

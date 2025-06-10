@@ -4,6 +4,8 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from pathlib import Path
+import psutil
+import os
 
 def safe_eval(val):
     try:
@@ -82,7 +84,11 @@ if __name__ == "__main__":
         features =  extract_graph_features(row)
         for key, value in features.items():
             df.at[row.name, key] = value
-        
+
+    print(f"[Correlation Analysis] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
+
+
     for col in df.columns:
         print(df[col].value_counts())
+    
 

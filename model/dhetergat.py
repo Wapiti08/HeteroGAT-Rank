@@ -243,7 +243,8 @@ class DiffHeteroGAT(torch.nn.Module):
         # ---- Final edge pooling using attention weights
         # edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
         edge_pool = self.edge_pool(edge_attr_dict)
-
+        node_pool = node_pool.to(device)
+        edge_pool = edge_pool.to(device)
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
         logits = self.classifier(graph_embed).squeeze(-1)

@@ -101,6 +101,8 @@ python3 mgan.py
 
 - entropy analysis:
 ```
+# under the golang project workdir
+go get github.com/shirou/gopsutil/v3
 go run *.go
 
 ```

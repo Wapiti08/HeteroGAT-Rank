@@ -42,6 +42,23 @@ def evaluate(logits, labels, threshold=0.5):
         
         return metrics
     
+def plot_loss_curve(loss_list, model_name):
+    """
+    plot loss convergence curve
+
+    Parameters:
+    - loss_list (list of float): the loss value of every epoch
+    - model_name (str): model name to be used in the plot title and filename
+    """
+    plt.figure()
+    plt.plot(range(1, len(loss_list) + 1), loss_list, marker='o')
+    plt.title(f"{model_name} Training Loss Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f"training_loss_{model_name.lower()}.png")
+    plt.show()
 
 def plot_roc(y_true, y_prob, save_path = "roc_curve.png"):
     if isinstance(y_true, torch.Tensor):
