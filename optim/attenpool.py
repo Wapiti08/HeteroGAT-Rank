@@ -28,25 +28,25 @@ class MultiTypeAttentionPooling(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, x_dict: Dict[str, torch.Tensor], mask_dict: Dict[str, torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
         ''' apply attention pooling over all node types
         
         args:
-            x_dict: dict of node type -> [N_i, F]
-            mask_dict: optional mask for each node type [N_i]
+            x_dict: dict of node type -> {node_type: [B, N, F]} or [N, F] is no batch
         
         returns:
             pooled_embedding: tensor of shape [F], aggregated from all node types
         '''
         pooled_outputs = []
         for node_type, x in x_dict.items():
-            score = self.attn_mlp(x).squeeze(-1)
-            if mask_dict and node_type in mask_dict:
-                score = score.masked_fill(mask_dict[node_type] == 0, float("-inf"))
+            if x.dim() == 2:  # no batch dimension
+                x = x.unsqueeze(0) # [N, F] -> [1, N, F]
+
+            score = self.attn_mlp(x).squeeze(-1) # [B, N]
             # sum to 1
-            attn = F.softmax(score, dim=0)
+            attn = F.softmax(score, dim=1) # [B, N]
             attn = self.dropout(attn)
-            pooled = torch.sum(attn.unsqueeze(-1)*x, dim=0)
+            pooled = torch.sum(attn.unsqueeze(-1) * x, dim=1) # [B, F]
             pooled_outputs.append(pooled)
 
         return torch.stack(pooled_outputs, dim=0).mean(dim=0)
@@ -58,13 +58,10 @@ class MultiTypeEdgePooling(nn.Module):
         args:
         '''
         super().__init__()
-        self.edge_attn_mlp = nn.Sequential(
-            nn.Linear(edge_attr_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, 1)
-        )
+        self.edge_mlps = nn.ModuleDict()
+        self.hidden_dim = hidden_dim
+        self.edge_attr_dim = edge_attr_dim
         self.dropout = nn.Dropout(dropout)
-
 
     def forward(self, edge_attr_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
@@ -75,17 +72,29 @@ class MultiTypeEdgePooling(nn.Module):
             pooled_edge_embedding: tensor of shape [F], aggregated from all edge types
         """
         pooled_edges = []
-        for edge_type, edge_attr in edge_attr_dict.items():
+        for (src_node_type, edge_type, tgt_node_type), edge_attr in edge_attr_dict.items():
+            if edge_type not in self.edge_mlps:
+                self.edge_mlps[edge_type] = nn.Sequential(
+                    nn.Linear(self.edge_attr_dim, self.hidden_dim),
+                    nn.Tanh(),
+                    nn.Linear(self.hidden_dim, 1)
+                )
+            
             # check whether it is sparse tensor
             if edge_attr.is_sparse:
                 edge_attr = edge_attr.to_dense()
-            if edge_attr.size(0) == 0:
-                continue
+
+            # add batch dimension
+            if edge_attr.dim() == 2: # [E, F]
+                edge_attr = edge_attr.unsqueeze(0) # [1, E, F]
             
-            score = self.edge_attn_mlp(edge_attr).squeeze(-1)  # [num_edges]
+            edge_attr = edge_attr.to(next(self.edge_mlps[edge_type].parameters()).device) 
+            score = self.edge_mlps[edge_type](edge_attr) # [B, E, 1]
+            # dimeansion 0 is different
             attn = F.softmax(score, dim=0)
             attn = self.dropout(attn)
-            pooled = torch.sum(attn.unsqueeze(-1) * edge_attr, dim=0)  # [F]
+
+            pooled = torch.sum(attn * edge_attr, dim=1)  # [B, F]
             pooled_edges.append(pooled)
 
         return torch.stack(pooled_edges, dim=0).mean(dim=0)

@@ -247,7 +247,9 @@ class PNHeteroGAT(torch.nn.Module):
         # ---- Final edge pooling using attention weights
         # edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
         edge_pool = self.edge_pool(edge_attr_dict)
-
+        
+        node_pool = node_pool.to(device)
+        edge_pool = edge_pool.to(device)
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
 
@@ -260,7 +262,6 @@ class PNHeteroGAT(torch.nn.Module):
         else:
             label = batch.label
         
-        print(graph_embed.shape, logits.shape, label.shape)
         # compute composite loss --- loss is a dict type
         loss_dict = self.loss_fn(
             cls_loss=F.binary_cross_entropy_with_logits(logits, label.float()),

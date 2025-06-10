@@ -26,6 +26,7 @@ def get_contrastive_pairs(graph_embeds: torch.Tensor, labels: torch.Tensor):
         return None, None
     return random.choice(pos_pairs), random.choice(neg_pairs)
 
+
 class CompositeLoss(nn.Module):
     def __init__(self, lambda_contrastive=0.1, lambda_sparsity=0.01, lambda_entropy=0.01):
         super().__init__()
