@@ -24,6 +24,18 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 
+def debug_shapes(x_dict, batch_dict, edge_attr_dict, edge_batch_dict, label):
+    print("==== Node Feature Shapes ====")
+    for k, v in x_dict.items():
+        print(f"{k:>15}: x = {v.shape}, batch = {batch_dict.get(k, 'N/A').shape}")
+
+    print("==== Edge Feature Shapes ====")
+    for k, v in edge_attr_dict.items():
+        batch_e = edge_batch_dict.get(k, None)
+        print(f"{str(k):>40}: edge_attr = {v.shape}, batch = {batch_e.shape if batch_e is not None else 'N/A'}")
+
+    print(f"==== Label Shape: {label.shape}")
+
 class PNHeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir):
         '''
@@ -199,12 +211,13 @@ class PNHeteroGAT(torch.nn.Module):
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
 
         '''
-        x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
+        x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
+        debug_shapes(x_dict, batch_dict, edge_attr_dict, edge_batch_dict, batch.label)
 
         # --- First conv ---
         local_edge_index_dict_1 = self.to_local_edge_indices(x_dict, edge_index_dict)
 
-        # ---- first conv with attention
+        # GAT layer 1
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 =\
             self.cal_attn_weight(self.conv1, x_dict, local_edge_index_dict_1)
 
@@ -221,7 +234,7 @@ class PNHeteroGAT(torch.nn.Module):
             else:
                 x_dict[node_type] = x
 
-        # --- Second conv ---
+        # GAT layer 2
         # Second conv still on original graph (no pooling)
         local_edge_index_dict_2 = self.to_local_edge_indices(x_dict, edge_index_dict)
 
@@ -242,25 +255,35 @@ class PNHeteroGAT(torch.nn.Module):
 
         # ---- Final node pooling (excluding Package_Name)
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
-        node_pool = self.node_pool(x_dict_target)
+        batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
+        print(batch_dict_target)
+        node_pool = self.node_pool(x_dict_target, batch_dict_target)
 
         # ---- Final edge pooling using attention weights
         # edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
-        edge_pool = self.edge_pool(edge_attr_dict)
+        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict)
         
         node_pool = node_pool.to(device)
         edge_pool = edge_pool.to(device)
+        
+        print(f"[Pooling] node_pool: {node_pool.shape}, edge_pool: {edge_pool.shape}, expected batch size: {batch.label.size(0)}")
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
-
+        print(self.classifier(graph_embed))
         logits = self.classifier(graph_embed).squeeze(-1)
+        print(logits)
+        print(f"logits shape: {logits.shape}")
+        # Make sure logits and label have the same shape
+        label = batch.label.view(-1)  # shape: [B]
+        print(f"logits shape: {logits.shape}, label shape: {label.shape}")
+
         # align with the shape
-        if logits.dim() == 0:
-            logits = logits.unsqueeze(0)
-        if batch.label.dim() == 0:
-            label = batch.label.unsqueeze(0)
-        else:
-            label = batch.label
+        # if logits.dim() == 0:
+        #     logits = logits.unsqueeze(0)
+        # if batch.label.dim() == 0:
+        #     label = batch.label.unsqueeze(0)
+        # else:
+        #     label = batch.label
         
         # compute composite loss --- loss is a dict type
         loss_dict = self.loss_fn(

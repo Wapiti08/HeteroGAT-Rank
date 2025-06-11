@@ -6,89 +6,141 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import psutil
 import os
+from sklearn.preprocessing import OneHotEncoder
 
-def safe_eval(val):
-    try:
-        return ast.literal_eval(val)
-    except:
-        return []
+def generate_eco_onehot(df, colname="Ecosystem"):
+    enc = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
+    reshaped = df[[colname]].astype(str)
+    onehot_array = enc.fit_transform(reshaped)
+    onehot_df = pd.DataFrame(onehot_array, columns=enc.get_feature_names_out([colname]))
+    return onehot_df, enc
+
+
+def extract_dns_features(row):
+    dns_query_count = 0
+    dns_host_set = set()
+    dns_type_counter = {}
+
+    for feature in ['import_DNS', 'install_DNS']:
+        dns_entries = row.get(feature, [])
+        if isinstance(dns_entries, (list, np.ndarray)):
+            for entry in dns_entries:
+                queries = entry.get("Queries", [])
+                for q in queries:
+                    hostname = q.get("Hostname")
+                    if hostname:
+                        dns_host_set.add(hostname)
+                    for t in q.get("Types", []):
+                        dns_type_counter[t] = dns_type_counter.get(t, 0) + 1
+                dns_query_count += len(queries)
+
+    return {
+        'dns_total_queries': dns_query_count,
+        'dns_unique_hosts': len(dns_host_set),
+        'dns_unique_types': len(dns_type_counter)
+    }
+
+def extract_file_features(row):
+    file_path_set = set()
+    action_counter = {"Read": 0, "Write": 0, "Delete": 0}
+
+    for feature in ['import_Files', 'install_Files']:
+        file_entries = row.get(feature, [])
+        if isinstance(file_entries, (list, np.ndarray)):
+            for ent in file_entries:
+                path = ent.get("Path")
+                if path:
+                    file_path_set.add(path)
+                for act in ["Read", "Write", "Delete"]:
+                    if ent.get(act):
+                        action_counter[act] += 1
+
+    return {
+        'file_unique_paths': len(file_path_set),
+        'file_read_count': action_counter["Read"],
+        'file_write_count': action_counter["Write"],
+        'file_delete_count': action_counter["Delete"]
+    }
+
+def extract_socket_features(row):
+    ip_set = set()
+    hostname_set = set()
+    port_set = set()
+
+    for feature in ['import_Sockets', 'install_Sockets']:
+        sock_entries = row.get(feature, [])
+        if isinstance(sock_entries, (list, np.ndarray)):
+            for ent in sock_entries:
+                ip = ent.get("Address")
+                if ip and ip != "::1":
+                    ip_set.add(ip)
+                hostnames = ent.get("Hostnames", [])
+                hostname_set.update(h for h in hostnames if h)
+                port = ent.get("Port")
+                if port and port != 0:
+                    port_set.add(str(port))
+
+    return {
+        'socket_unique_ips': len(ip_set),
+        'socket_unique_hostnames': len(hostname_set),
+        'socket_unique_ports': len(port_set)
+    }
+
+def extract_command_features(row):
+    cmd_total_count = 0
+    cmd_arg_total = 0
+    cmd_env_total = 0
+    cmd_unique_set = set()
+
+    for feature in ['import_Commands', 'install_Commands']:
+        cmd_entries = row.get(feature, [])
+        if isinstance(cmd_entries, (list, np.ndarray)):
+            for ent in cmd_entries:
+                cmd = ent.get("Command", [])
+                env = ent.get("Environment", [])
+                cmd_total_count += 1
+                cmd_arg_total += len(cmd)
+                cmd_env_total += len(env)
+                if isinstance(cmd, (list, np.ndarray)) and len(cmd) > 0:
+                    cmd_unique_set.add(" ".join(cmd))
+
+    return {
+        'cmd_total_count': cmd_total_count,
+        'cmd_total_args': cmd_arg_total,
+        'cmd_total_envs': cmd_env_total,
+        'cmd_unique_commands': len(cmd_unique_set)
+    }
+
 
 def extract_graph_features(row):
-    def count_rw_ops(file_list):
-        read, write, delete = 0, 0, 0
-        for item in file_list:
-            if isinstance(item, dict):
-                read += int(item.get('Read', False))
-                write += int(item.get('Write', False))
-                delete += int(item.get('Delete', False))
-        return read, write, delete
-
-    def count_command_stats(command_list):
-        total_cmds = 0
-        total_args = 0
-        total_envs = 0
-        for cmd in command_list:
-            if isinstance(cmd, dict):
-                cmd_arr = cmd.get('Command', [])
-                env_arr = cmd.get('Environment', [])
-                total_cmds += 1
-                total_args += len(cmd_arr)
-                total_envs += len(env_arr)
-        return total_cmds, total_args, total_envs
-
     features = {}
-
-    # Parse all complex columns
-    import_files = safe_eval(row['import_Files'])
-    install_files = safe_eval(row['install_Files'])
-    import_cmds = safe_eval(row['import_Commands'])
-    install_cmds = safe_eval(row['install_Commands'])
-    import_dns = safe_eval(row['import_DNS'])
-    install_dns = safe_eval(row['install_DNS'])
-    import_socks = safe_eval(row['import_Sockets'])
-    install_socks = safe_eval(row['install_Sockets'])
-
-    # File access
-    r1, w1, d1 = ount_rw_opsc(import_files)
-    r2, w2, d2 = count_rw_ops(install_files)
-    features.update({
-        'import_read': r1, 'import_write': w1, 'import_delete': d1,
-        'install_read': r2, 'install_write': w2, 'install_delete': d2
-    })
-
-    # Commands
-    c1, a1, e1 = count_command_stats(import_cmds)
-    c2, a2, e2 = count_command_stats(install_cmds)
-    features.update({
-        'import_command_count': c1, 'import_arg_count': a1, 'import_env_count': e1,
-        'install_command_count': c2, 'install_arg_count': a2, 'install_env_count': e2
-    })
-
-    # DNS & Socket
-    features['import_dns_count'] = len(import_dns)
-    features['install_dns_count'] = len(install_dns)
-    features['import_socket_count'] = len(import_socks)
-    features['install_socket_count'] = len(install_socks)
-
-    # --- Ecosystem Encoding ---
-    eco_str = str(row.get('Ecosystem', 'unknown'))
-    eco_code = hash(eco_str) % 1000  # hash-based encoding (or map manually if needed)
-    features['eco_code'] = eco_code
-
+    features.update(extract_dns_features(row))
+    features.update(extract_file_features(row))
+    features.update(extract_socket_features(row))
+    features.update(extract_command_features(row))
     return pd.Series(features)
+
+
+def extract_all_features(df):
+    features_df = df.apply(extract_graph_features, axis=1)
+
+    # generate one-hot encoded eco
+    eco_onehot_df, _ = generate_eco_onehot(df)
+    features_df = pd.concat([features_df, eco_onehot_df], axis=1)
+
+    if 'Label' in df.columns:
+        features_df['Label'] = df['Label']
+
+    return features_df
+
 
 if __name__ == "__main__":
     data_path = Path.cwd().parent.parent.joinpath("data", "label_data.pkl")
     df = pd.read_pickle(data_path)
-    for _, row in df.iterrows():
-        features =  extract_graph_features(row)
-        for key, value in features.items():
-            df.at[row.name, key] = value
-
+    fea_df = extract_all_features(df)
     print(f"[Correlation Analysis] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
-
-
-    for col in df.columns:
+    fea_df.to_csv(Path.cwd().joinpath("feature_matrix.csv"), index=False)
+    for col in fea_df.columns:
         print(df[col].value_counts())
     
 

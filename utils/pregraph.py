@@ -6,30 +6,68 @@ import torch
 from torch_geometric.data import HeteroData
 import os
 import pickle
+from typing import Dict, Tuple
 
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-def batch_dict(batch: HeteroData):
-    ''' function to extract x_dict and edge_index_dict from custom batch data
-    
-    '''
-    # extract node features into a dict
-    x_dict = {node_type: batch[node_type].x for node_type in batch.node_types if 'x' in batch[node_type]}
-    
-    # extract edge_index into a dict
-    edge_index_dict = {
-        edge_type: batch[edge_type].edge_index for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
-    }
+def parse_batch_dict(batch: HeteroData)-> Tuple[
+        Dict[str, torch.Tensor],  # x_dict
+        Dict[Tuple[str, str, str], torch.Tensor],  # edge_index_dict
+        Dict[str, torch.Tensor],  # batch_dict
+        Dict[Tuple[str, str, str], torch.Tensor],  # edge_attr_dict
+        Dict[Tuple[str, str, str], torch.Tensor]   # edge_batch_dict
+        ]:
+    """
+    Extracts x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
+    from either a single HeteroData object or a batched version.
+    """
+    if hasattr(batch, 'batch'):  # batched HeteroData
+        x_dict = {
+            node_type: batch[node_type].x
+            for node_type in batch.node_types if 'x' in batch[node_type]
+        }
+        batch_dict = {
+            node_type: batch[node_type].batch
+            for node_type in batch.node_types if 'batch' in batch[node_type]
+        }
+        edge_index_dict = {
+            edge_type: batch[edge_type].edge_index
+            for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
+        }
+        edge_attr_dict = {
+            edge_type: batch[edge_type].edge_attr
+            for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
+        }
+        edge_batch_dict = {
+            edge_type: batch[edge_type].batch
+            for edge_type in batch.edge_types if 'batch' in batch[edge_type]
+        }
+    else:  # single graph
+        x_dict = {
+            node_type: batch[node_type].x
+            for node_type in batch.node_types if 'x' in batch[node_type]
+        }
+        edge_index_dict = {
+            edge_type: batch[edge_type].edge_index
+            for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
+        }
+        edge_attr_dict = {
+            edge_type: batch[edge_type].edge_attr
+            for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
+        }
+        # set all batch IDs to 0 for single graph
+        batch_dict = {
+            node_type: torch.zeros(batch[node_type].x.size(0), dtype=torch.long, device=batch[node_type].x.device)
+            for node_type in x_dict
+        }
+        edge_batch_dict = {
+            edge_type: torch.zeros(batch[edge_type].edge_attr.size(0), dtype=torch.long, device=batch[edge_type].edge_attr.device)
+            for edge_type in edge_attr_dict
+        }
 
-    # extract edge_attr into a dict
-    edge_attr_dict = {
-        edge_type: batch[edge_type].edge_attr for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
-
-    }
-
-    return x_dict, edge_index_dict, edge_attr_dict
+    return x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
 
 
 def miss_check(x_dict, node_types, hidden_dim):

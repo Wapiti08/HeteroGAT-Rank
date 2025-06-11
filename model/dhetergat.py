@@ -75,12 +75,8 @@ class DiffHeteroGAT(torch.nn.Module):
         )
 
         # layernorm for each node type after conv1 and conv2
-        self.ln1 = torch.nn.ModuleDict()
-        self.ln2 = torch.nn.ModuleDict()
-
-        for node_type in node_types:
-            self.ln1[node_type] = LayerNorm(hidden_channels * num_heads)
-            self.ln2[node_type] = LayerNorm(hidden_channels * num_heads)
+        self.ln1 = torch.nn.ModuleDict({nt: LayerNorm(hidden_channels * num_heads) for nt in node_types})
+        self.ln2 = torch.nn.ModuleDict({nt: LayerNorm(hidden_channels * num_heads) for nt in node_types})
 
         self.pkgname_projector = torch.nn.Linear(400, 256)
         # define attention pool for node and edge
@@ -195,7 +191,7 @@ class DiffHeteroGAT(torch.nn.Module):
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
 
         '''
-        x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
+        x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
 
         # --- First conv ---
         local_edge_index_dict_1 = self.to_local_edge_indices(x_dict, edge_index_dict)
@@ -235,14 +231,15 @@ class DiffHeteroGAT(torch.nn.Module):
             else:
                 x_dict[node_type] = x
 
-
         # ---- Final node pooling (excluding Package_Name)
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
-        node_pool = self.node_pool(x_dict_target)
+        batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
+
+        node_pool = self.node_pool(x_dict_target, batch_dict_target)
 
         # ---- Final edge pooling using attention weights
         # edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
-        edge_pool = self.edge_pool(edge_attr_dict)
+        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict)
         node_pool = node_pool.to(device)
         edge_pool = edge_pool.to(device)
         # last attention weight calculation after pooling

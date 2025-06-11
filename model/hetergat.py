@@ -48,12 +48,8 @@ class HeterGAT(torch.nn.Module):
         )
 
         # layernorm for each node type after conv1 and conv2
-        self.ln1 = torch.nn.ModuleDict()
-        self.ln2 = torch.nn.ModuleDict()
-
-        for node_type in node_types:
-            self.ln1[node_type] = LayerNorm(hidden_channels * num_heads)
-            self.ln2[node_type] = LayerNorm(hidden_channels * num_heads)
+        self.ln1 = torch.nn.ModuleDict({nt: LayerNorm(hidden_channels * num_heads) for nt in node_types})
+        self.ln2 = torch.nn.ModuleDict({nt: LayerNorm(hidden_channels * num_heads) for nt in node_types})
 
         # Binary cross-entropy loss with optional class weighting
         self.loss_fn = nn.BCEWithLogitsLoss()
@@ -156,7 +152,7 @@ class HeterGAT(torch.nn.Module):
         args:
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
         '''
-        x_dict, edge_index_dict, edge_attr_dict = batch_dict(batch)
+        x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
         # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 = self.cal_attn_weight(self.conv1, x_dict, edge_index_dict)
         
@@ -190,7 +186,8 @@ class HeterGAT(torch.nn.Module):
         for node_type, x in x_dict.items():
             # global_mean_pool does not support sparse tensors
             x = x.to_dense()
-            pooled = global_mean_pool(x, torch.zeros(x.size(0), dtype=torch.long).to(x.device))
+            # pooled = global_mean_pool(x, torch.zeros(x.size(0), dtype=torch.long).to(x.device))
+            pooled = global_mean_pool(x, batch_dict[node_type])
             pooled_outputs.append(pooled)
 
         # ---- final classification

@@ -6,18 +6,27 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-def correlation_analysis(df, label_column='Label', method='pearson', visualize=True):
-    # Step 1: Extract features for each row
-    features_df = df.apply(extract_graph_features, axis=1)
+def correlation_analysis(features_df, label_column='Label', method='pearson', visualize=True):
+    '''
+    Compute and visualize the correlation matrix from a feature DataFrame.
 
-    # Step 2: Optionally include the label
-    if label_column in df.columns:
-        features_df['Label'] = df[label_column]
+    Parameters:
+    - features_df: pandas DataFrame with numerical features and optional label column
+    - label_column: name of the label column (must be in features_df if included)
+    - method: correlation method ('pearson', 'spearman', etc.)
+    - visualize: if True, plot the heatmap
 
-    # Step 3: Compute correlation
+    Returns:
+    - corr_matrix: pandas DataFrame of correlation coefficients
+    '''
+    # Sanity check
+    if label_column not in features_df.columns:
+        raise ValueError(f"'{label_column}' not found in features_df columns.")
+
+    # Compute correlation
     corr_matrix = features_df.corr(method=method)
 
-    # Step 4: Plot heatmap
+    # Plot heatmap
     if visualize:
         plt.figure(figsize=(12, 10))
         sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm', center=0)
@@ -25,13 +34,14 @@ def correlation_analysis(df, label_column='Label', method='pearson', visualize=T
         plt.tight_layout()
         plt.show()
 
-    # save corr_matrix to csv
-    corr_matrix.to_csv(Path.cwd().joinpath("corr_matrix.csv"))
+    # Save correlation matrix
+    corr_path = Path.cwd().joinpath("corr_matrix.csv")
+    corr_matrix.to_csv(corr_path)
 
     return corr_matrix
 
 if __name__ == "__main__":
-    data_path = Path.cwd().parent.parent.joinpath("data", "label_data.pkl")
-    df = pd.read_pickle(data_path)
-    corr_matrix = correlation_analysis(df, label_column='Label', method='pearson', visualize=True)
+    data_path = Path.cwd().joinpath("feature_matrix.csv")
+    fea_df = pd.read_csv(data_path)
+    corr_matrix = correlation_analysis(fea_df, label_column='Label', method='pearson', visualize=True)
     print(corr_matrix)

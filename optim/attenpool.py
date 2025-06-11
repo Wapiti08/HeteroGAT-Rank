@@ -25,31 +25,45 @@ class MultiTypeAttentionPooling(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, 1)
         )
-
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, x_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self,
+        x_dict: Dict[str, torch.Tensor],
+        batch_dict: Dict[str, torch.Tensor],
+        ) -> torch.Tensor:
         ''' apply attention pooling over all node types
         
-        args:
-            x_dict: dict of node type -> {node_type: [B, N, F]} or [N, F] is no batch
-        
+        Args:
+            x_dict: dict of node_type -> [N, F]
+            batch_dict: dict of node_type -> [N], indicates each node's graph in the batch
+
         returns:
-            pooled_embedding: tensor of shape [F], aggregated from all node types
+            pooled_embedding: Tensor of shape [B, F]
         '''
         pooled_outputs = []
         for node_type, x in x_dict.items():
-            if x.dim() == 2:  # no batch dimension
-                x = x.unsqueeze(0) # [N, F] -> [1, N, F]
+            batch = batch_dict.get(node_type, torch.zeros(x.size(0), dtype=torch.long, device=x.device))
+            score = self.attn_mlp(x).squeeze(-1)  # [N]
+            attn = torch.zeros_like(score, device=x.device)  # [N]
 
-            score = self.attn_mlp(x).squeeze(-1) # [B, N]
-            # sum to 1
-            attn = F.softmax(score, dim=1) # [B, N]
-            attn = self.dropout(attn)
-            pooled = torch.sum(attn.unsqueeze(-1) * x, dim=1) # [B, F]
+            for b in torch.unique(batch):
+                mask = (batch == b)
+                mask = mask.to(score.device)
+                score_b = score[mask]  # scores for nodes in the same graph
+                attn_b = F.softmax(score_b, dim=0)  # softmax over the scores
+                attn[mask] = attn_b  # assign back to the full attention vector
+            
+            attn = self.dropout(attn)  # apply dropout
+            pooled = torch.zeros(batch.max().item() + 1, x.size(1), device=x.device)
+            for b in torch.unique(batch):
+                mask = (batch == b)
+                mask = mask.to(attn.device)
+                pooled[b] += torch.sum(attn[mask].unsqueeze(-1) * x[mask], dim=0)
+
             pooled_outputs.append(pooled)
 
-        return torch.stack(pooled_outputs, dim=0).mean(dim=0)
+        stacked = torch.stack(pooled_outputs, dim=0)  # [T, B, F]
+        return stacked.mean(dim=0)  # [B, F]
 
 
 class MultiTypeEdgePooling(nn.Module):
@@ -63,16 +77,26 @@ class MultiTypeEdgePooling(nn.Module):
         self.edge_attr_dim = edge_attr_dim
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, edge_attr_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(
+        self,
+        edge_attr_dict: Dict[Tuple[str, str, str], torch.Tensor],
+        batch_edge_dict: Dict[Tuple[str, str, str], torch.Tensor]
+    ) -> torch.Tensor:
         """
         Args:
-            edge_attr_dict: dict of edge_type -> [num_edges, F] edge features
+            edge_attr_dict: dict of edge_type -> [E, F] edge features
+            batch_edge_dict: dict of edge_type -> [E] indicating graph membership
 
         Returns:
-            pooled_edge_embedding: tensor of shape [F], aggregated from all edge types
+            pooled_edge_embedding: tensor of shape [B, F], aggregated per graph
         """
         pooled_edges = []
+
         for (src_node_type, edge_type, tgt_node_type), edge_attr in edge_attr_dict.items():
+            batch_e = batch_edge_dict.get((src_node_type, edge_type, tgt_node_type), None)
+            if batch_e is None:
+                continue
+
             if edge_type not in self.edge_mlps:
                 self.edge_mlps[edge_type] = nn.Sequential(
                     nn.Linear(self.edge_attr_dim, self.hidden_dim),
@@ -85,19 +109,35 @@ class MultiTypeEdgePooling(nn.Module):
                 edge_attr = edge_attr.to_dense()
 
             # add batch dimension
-            if edge_attr.dim() == 2: # [E, F]
-                edge_attr = edge_attr.unsqueeze(0) # [1, E, F]
+            # if edge_attr.dim() == 2: # [E, F]
+            #     edge_attr = edge_attr.unsqueeze(0) # [1, E, F]
             
             edge_attr = edge_attr.to(next(self.edge_mlps[edge_type].parameters()).device) 
-            score = self.edge_mlps[edge_type](edge_attr) # [B, E, 1]
-            # dimeansion 0 is different
-            attn = F.softmax(score, dim=0)
-            attn = self.dropout(attn)
+            batch_e = batch_e.to(edge_attr.device)
+            score = self.edge_mlps[edge_type](edge_attr).squeeze(-1)  # [E]
 
-            pooled = torch.sum(attn * edge_attr, dim=1)  # [B, F]
+            attn = torch.zeros_like(score)
+            for b in torch.unique(batch_e):
+                mask = (batch_e == b)
+                mask = mask.to(score.device)
+                score_b = score[mask]
+                attn_b = F.softmax(score_b, dim=0)
+                attn[mask] = attn_b
+
+            attn = self.dropout(attn)
+            messages = attn.unsqueeze(-1) * edge_attr  # [E, F]
+
+            # aggregate messages per graph
+            B = batch_e.max().item() + 1
+            pooled = torch.zeros(B, edge_attr.size(1), device=edge_attr.device)
+            for b in torch.unique(batch_e):
+                mask = (batch_e == b)
+                mask = mask.to(attn.device)
+                pooled[b] += torch.sum(messages[mask], dim=0)
+
             pooled_edges.append(pooled)
 
-        return torch.stack(pooled_edges, dim=0).mean(dim=0)
+        return torch.stack(pooled_edges, dim=0).mean(dim=0)  # [B, F]
 
 
 
