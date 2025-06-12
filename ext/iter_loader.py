@@ -12,7 +12,7 @@ from torch_geometric.data import Batch
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class IterSubGraphs(IterableDataset):
+class IterSubGraphs(Dataset):
     
     def __init__(self, root, batch_size=1, transform=None):
         self.batch_size = batch_size

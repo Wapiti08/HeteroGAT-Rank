@@ -19,45 +19,32 @@ def parse_batch_dict(batch: HeteroData)-> Tuple[
         Dict[Tuple[str, str, str], torch.Tensor],  # edge_attr_dict
         Dict[Tuple[str, str, str], torch.Tensor]   # edge_batch_dict
         ]:
-    """
-    Extracts x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
-    from either a single HeteroData object or a batched version.
-    """
-    if hasattr(batch, 'batch'):  # batched HeteroData
-        x_dict = {
-            node_type: batch[node_type].x
-            for node_type in batch.node_types if 'x' in batch[node_type]
-        }
+    
+    is_batched = any('batch' in batch[node_type] for node_type in batch.node_types)
+
+    x_dict = {
+        node_type: batch[node_type].x
+        for node_type in batch.node_types if 'x' in batch[node_type]
+    }
+    edge_index_dict = {
+        edge_type: batch[edge_type].edge_index
+        for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
+    }
+    edge_attr_dict = {
+        edge_type: batch[edge_type].edge_attr
+        for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
+    }
+
+    if is_batched:
         batch_dict = {
             node_type: batch[node_type].batch
             for node_type in batch.node_types if 'batch' in batch[node_type]
-        }
-        edge_index_dict = {
-            edge_type: batch[edge_type].edge_index
-            for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
-        }
-        edge_attr_dict = {
-            edge_type: batch[edge_type].edge_attr
-            for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
         }
         edge_batch_dict = {
             edge_type: batch[edge_type].batch
             for edge_type in batch.edge_types if 'batch' in batch[edge_type]
         }
-    else:  # single graph
-        x_dict = {
-            node_type: batch[node_type].x
-            for node_type in batch.node_types if 'x' in batch[node_type]
-        }
-        edge_index_dict = {
-            edge_type: batch[edge_type].edge_index
-            for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
-        }
-        edge_attr_dict = {
-            edge_type: batch[edge_type].edge_attr
-            for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
-        }
-        # set all batch IDs to 0 for single graph
+    else:
         batch_dict = {
             node_type: torch.zeros(batch[node_type].x.size(0), dtype=torch.long, device=batch[node_type].x.device)
             for node_type in x_dict

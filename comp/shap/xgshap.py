@@ -9,7 +9,7 @@ import os
 
 def train_xgboost_shap(features_df, label_column='Label', save_plot=False, plot_prefix='shap'):
     assert label_column in features_df.columns, "Label column not found."
-
+    
     # drop non-numeric columns
     drop_cols = [label_column]
     for col in ['name_version', 'Ecosystem']:

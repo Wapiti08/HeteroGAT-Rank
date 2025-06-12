@@ -42,8 +42,13 @@ class MultiTypeAttentionPooling(nn.Module):
         '''
         
         pooled_outputs = []
+        batch_ids = None
+
         for node_type, x in x_dict.items():
             batch = batch_dict.get(node_type, torch.zeros(x.size(0), dtype=torch.long, device=x.device))
+            
+            print(f"[DEBUG] node_type={node_type}, unique batch IDs = {torch.unique(batch)}")
+
             score = self.attn_mlp(x).squeeze(-1)  # [N]
             attn = torch.zeros_like(score, device=x.device)  # [N]
 
@@ -55,16 +60,33 @@ class MultiTypeAttentionPooling(nn.Module):
                 attn[mask] = attn_b  # assign back to the full attention vector
             
             attn = self.dropout(attn)  # apply dropout
-            pooled = torch.zeros(batch.max().item() + 1, x.size(1), device=x.device)
+            messages = attn.unsqueeze(-1) * x
+
+            B = batch.max().item() + 1
+            pooled = torch.zeros(B, x.size(1), device=x.device)  # [B, F]
+
             for b in torch.unique(batch):
                 mask = (batch == b)
                 mask = mask.to(attn.device)
-                pooled[b] += torch.sum(attn[mask].unsqueeze(-1) * x[mask], dim=0)
+                pooled[b] += torch.sum(messages[mask], dim=0)
 
             pooled_outputs.append(pooled)
 
-        stacked = torch.stack(pooled_outputs, dim=0)  # [T, B, F]
-        return stacked.mean(dim=0)  # [B, F]
+            # capture batch ids for final alignment check
+            if batch_ids is None:
+                batch_ids = batch.unique()
+            else:
+                batch_ids = torch.unique(torch.cat([batch_ids, batch.unique()]))
+
+        # Align all pooled outputs by batch size
+        B = batch_ids.max().item() + 1
+        for i in range(len(pooled_outputs)):
+            if pooled_outputs[i].size(0) < B:
+                pad = torch.zeros(B - pooled_outputs[i].size(0), pooled_outputs[i].size(1), device=pooled_outputs[i].device)
+                pooled_outputs[i] = torch.cat([pooled_outputs[i], pad], dim=0)
+
+
+        return torch.stack(pooled_outputs, dim=0).mean(dim=0)
 
 
 class MultiTypeEdgePooling(nn.Module):
@@ -92,7 +114,7 @@ class MultiTypeEdgePooling(nn.Module):
             pooled_edge_embedding: tensor of shape [B, F], aggregated per graph
         """
         pooled_edges = []
-
+        max_B = 0
         for (src_node_type, edge_type, tgt_node_type), edge_attr in edge_attr_dict.items():
             batch_e = batch_edge_dict.get((src_node_type, edge_type, tgt_node_type), None)
             if batch_e is None:
@@ -131,12 +153,20 @@ class MultiTypeEdgePooling(nn.Module):
             # aggregate messages per graph
             B = batch_e.max().item() + 1
             pooled = torch.zeros(B, edge_attr.size(1), device=edge_attr.device)
+
             for b in torch.unique(batch_e):
                 mask = (batch_e == b)
                 mask = mask.to(attn.device)
                 pooled[b] += torch.sum(messages[mask], dim=0)
 
             pooled_edges.append(pooled)
+            max_B = max(max_B, B)
+
+        for i, pooled in enumerate(pooled_edges):
+            if pooled.size(0) < max_B:
+                pad = torch.zeros(max_B - pooled.size(0), pooled.size(1), device=pooled.device)
+                pooled_edges[i] = torch.cat([pooled, pad], dim=0)
+
 
         return torch.stack(pooled_edges, dim=0).mean(dim=0)  # [B, F]
 

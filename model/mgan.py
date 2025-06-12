@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from ext.iter_loader import IterSubGraphs
+from ext.iter_loader import IterSubGraphs, collate_hetero_data
 from utils.evals import plot_loss_curve
 from ana import diffanalyzer, explain
 from torch_geometric.loader import DataLoader
@@ -277,13 +277,13 @@ if __name__ == "__main__":
     ).to(device)
 
     optimizer = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
-    
     train_loader = DataLoader(
         train_data,
         batch_size=4,
         shuffle=True,
         pin_memory=False,
-        prefetch_factor=None
+        prefetch_factor=None,
+        collate_fn=collate_hetero_data,
     )
 
     test_loader = DataLoader(
@@ -291,7 +291,8 @@ if __name__ == "__main__":
         batch_size=4,
         shuffle=True,
         pin_memory=False,
-        prefetch_factor=None
+        prefetch_factor=None,
+        collate_fn=collate_hetero_data,
     )
 
     # define the starting time
@@ -300,7 +301,6 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         total_loss = 0
         for batch in train_loader:
-            
             batch=batch.to(device)
 
             optimizer.zero_grad()

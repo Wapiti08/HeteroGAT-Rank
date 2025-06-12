@@ -211,10 +211,18 @@ class PNHeteroGAT(torch.nn.Module):
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
 
         '''
-        x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
-        debug_shapes(x_dict, batch_dict, edge_attr_dict, edge_batch_dict, batch.label)
+        assert batch.label.size(0) > 1, "Only one graph in batch — check your DataLoader or dataset batching!"
+        print(f"[DEBUG] batch['Path'].batch.unique() = {batch['Path'].batch.unique()}")
 
-        # --- First conv ---
+        x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
+
+        for k, v in batch_dict.items():
+            print(f"[DEBUG] batch_dict[{k}]: shape = {v.shape}, unique = {torch.unique(v)}")
+
+        for k, v in edge_batch_dict.items():
+            print(f"[DEBUG] edge_batch_dict[{k}]: shape = {v.shape}, unique = {torch.unique(v)}")
+
+        # convert global indices to local indices
         local_edge_index_dict_1 = self.to_local_edge_indices(x_dict, edge_index_dict)
 
         # GAT layer 1
@@ -256,7 +264,7 @@ class PNHeteroGAT(torch.nn.Module):
         # ---- Final node pooling (excluding Package_Name)
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
         batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
-        print(batch_dict_target)
+        
         node_pool = self.node_pool(x_dict_target, batch_dict_target)
 
         # ---- Final edge pooling using attention weights
@@ -269,7 +277,7 @@ class PNHeteroGAT(torch.nn.Module):
         print(f"[Pooling] node_pool: {node_pool.shape}, edge_pool: {edge_pool.shape}, expected batch size: {batch.label.size(0)}")
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
-        print(self.classifier(graph_embed))
+
         logits = self.classifier(graph_embed).squeeze(-1)
         print(logits)
         print(f"logits shape: {logits.shape}")
