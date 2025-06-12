@@ -8,13 +8,6 @@ import psutil
 import os
 from sklearn.preprocessing import OneHotEncoder
 
-def generate_eco_onehot(df, colname="Ecosystem"):
-    enc = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-    reshaped = df[[colname]].astype(str)
-    onehot_array = enc.fit_transform(reshaped)
-    onehot_df = pd.DataFrame(onehot_array, columns=enc.get_feature_names_out([colname]))
-    return onehot_df, enc
-
 
 def extract_dns_features(row):
     dns_query_count = 0
@@ -125,11 +118,12 @@ def extract_all_features(df):
     features_df = df.apply(extract_graph_features, axis=1)
 
     # generate one-hot encoded eco
-    eco_onehot_df, _ = generate_eco_onehot(df)
-    features_df = pd.concat([features_df, eco_onehot_df], axis=1)
+    features_df['Ecosystem'] = df['Ecosystem'].astype(str)
 
     if 'Label' in df.columns:
         features_df['Label'] = df['Label']
+
+    features_df['name_version'] = df['Name'].astype(str) + "_" + df['Version'].astype(str)
 
     return features_df
 
@@ -137,9 +131,19 @@ def extract_all_features(df):
 if __name__ == "__main__":
     data_path = Path.cwd().parent.parent.joinpath("data", "label_data.pkl")
     df = pd.read_pickle(data_path)
-    fea_df = extract_all_features(df)
+    all_df = extract_all_features(df)
     print(f"[Correlation Analysis] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
+    target_columns = [
+        "name_version", "Ecosystem", "dns_total_queries", 
+        "dns_unique_hosts", "dns_unique_types", "file_unique_paths",
+        "file_read_count", "file_write_count", "file_delete_count",
+        "socket_unique_ips", "socket_unique_hostnames", "socket_unique_ports",
+        "cmd_total_count", "cmd_total_args", "cmd_total_envs", "cmd_unique_commands", "Label"
+    ]
+    fea_df = all_df[target_columns].copy()
+    print(fea_df.columns)
     fea_df.to_csv(Path.cwd().joinpath("feature_matrix.csv"), index=False)
+
     for col in fea_df.columns:
         print(df[col].value_counts())
     

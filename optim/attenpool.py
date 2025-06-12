@@ -40,6 +40,7 @@ class MultiTypeAttentionPooling(nn.Module):
         returns:
             pooled_embedding: Tensor of shape [B, F]
         '''
+        
         pooled_outputs = []
         for node_type, x in x_dict.items():
             batch = batch_dict.get(node_type, torch.zeros(x.size(0), dtype=torch.long, device=x.device))
