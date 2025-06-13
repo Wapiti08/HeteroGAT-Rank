@@ -145,6 +145,6 @@ if __name__ == "__main__":
     fea_df.to_csv(Path.cwd().joinpath("feature_matrix.csv"), index=False)
 
     for col in fea_df.columns:
-        print(df[col].value_counts())
+        print(fea_df[col].value_counts())
     
 

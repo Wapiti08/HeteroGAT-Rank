@@ -277,6 +277,7 @@ if __name__ == "__main__":
     ).to(device)
 
     optimizer = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
+    # have to use batch_size larger than 1 for constrative loss computation
     train_loader = DataLoader(
         train_data,
         batch_size=4,
@@ -284,6 +285,7 @@ if __name__ == "__main__":
         pin_memory=False,
         prefetch_factor=None,
         collate_fn=collate_hetero_data,
+        drop_last=True
     )
 
     test_loader = DataLoader(
@@ -293,6 +295,7 @@ if __name__ == "__main__":
         pin_memory=False,
         prefetch_factor=None,
         collate_fn=collate_hetero_data,
+        drop_last=True
     )
 
     # define the starting time

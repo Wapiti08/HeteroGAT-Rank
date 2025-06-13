@@ -3,11 +3,15 @@
  # @ Modified time: 2025-06-05 12:01:02
  # @ Description: function to increase the explainability and the ensemble loss function to maximize the difference of positive and negative loss function
  '''
-
+import sys
+from pathlib import Path
+sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Tuple, List
+from utils import sparsepad
+
 
 class MultiTypeAttentionPooling(nn.Module):
     def __init__(self, in_dim: int, hidden_dim: int=64, dropout: float=0.1):
@@ -47,8 +51,6 @@ class MultiTypeAttentionPooling(nn.Module):
         for node_type, x in x_dict.items():
             batch = batch_dict.get(node_type, torch.zeros(x.size(0), dtype=torch.long, device=x.device))
             
-            print(f"[DEBUG] node_type={node_type}, unique batch IDs = {torch.unique(batch)}")
-
             score = self.attn_mlp(x).squeeze(-1)  # [N]
             attn = torch.zeros_like(score, device=x.device)  # [N]
 
@@ -116,29 +118,39 @@ class MultiTypeEdgePooling(nn.Module):
         pooled_edges = []
         max_B = 0
         for (src_node_type, edge_type, tgt_node_type), edge_attr in edge_attr_dict.items():
+            # Get corresponding batch vector for this edge type
             batch_e = batch_edge_dict.get((src_node_type, edge_type, tgt_node_type), None)
-            if batch_e is None:
+
+            # Skip if no batch info or empty edge features
+            if batch_e is None or edge_attr.size(0) == 0:
+                print(f"[EdgePool] Skipping {edge_type} — batch_e is None or edge_attr.size(0)==0")
                 continue
 
+            # Convert sparse tensor to dense values if needed
+            if edge_attr.is_sparse:
+                edge_attr = edge_attr.to_dense()  # [E, F]
+                assert edge_attr.size(0) == batch_e.size(0), \
+                    f"[ERROR] edge_attr.size(0) = {edge_attr.size(0)} ≠ batch_e.size(0) = {batch_e.size(0)}"
+
+            elif edge_attr.dim() == 1:
+                edge_attr = edge_attr.unsqueeze(1)  # if [E]，convert to [E, 1]
+
+            elif edge_attr.dim() != 2:
+                raise ValueError(f"[ERROR] Unexpected edge_attr shape: {edge_attr.shape}")
+            
+            # Initialize attention MLP for this edge_type if not already created
             if edge_type not in self.edge_mlps:
                 self.edge_mlps[edge_type] = nn.Sequential(
                     nn.Linear(self.edge_attr_dim, self.hidden_dim),
                     nn.Tanh(),
                     nn.Linear(self.hidden_dim, 1)
                 )
-            
-            # check whether it is sparse tensor
-            if edge_attr.is_sparse:
-                edge_attr = edge_attr.to_dense()
 
-            # add batch dimension
-            # if edge_attr.dim() == 2: # [E, F]
-            #     edge_attr = edge_attr.unsqueeze(0) # [1, E, F]
-            
             edge_attr = edge_attr.to(next(self.edge_mlps[edge_type].parameters()).device) 
             batch_e = batch_e.to(edge_attr.device)
+            # Compute attention score for each edge: shape [E]
             score = self.edge_mlps[edge_type](edge_attr).squeeze(-1)  # [E]
-
+            # Compute attention weights via softmax per graph in batch
             attn = torch.zeros_like(score)
             for b in torch.unique(batch_e):
                 mask = (batch_e == b)
@@ -152,6 +164,7 @@ class MultiTypeEdgePooling(nn.Module):
 
             # aggregate messages per graph
             B = batch_e.max().item() + 1
+            max_B = max(max_B, B)
             pooled = torch.zeros(B, edge_attr.size(1), device=edge_attr.device)
 
             for b in torch.unique(batch_e):
@@ -160,13 +173,17 @@ class MultiTypeEdgePooling(nn.Module):
                 pooled[b] += torch.sum(messages[mask], dim=0)
 
             pooled_edges.append(pooled)
-            max_B = max(max_B, B)
 
+        # Pad pooled tensors to max_B so they can be stacked
         for i, pooled in enumerate(pooled_edges):
             if pooled.size(0) < max_B:
                 pad = torch.zeros(max_B - pooled.size(0), pooled.size(1), device=pooled.device)
                 pooled_edges[i] = torch.cat([pooled, pad], dim=0)
 
+        # If no edge types were processed, return fallback zero tensor
+        if not pooled_edges:    
+            print("[EdgePool] Warning: No edge types were pooled. Returning zeros.")
+            return torch.zeros(1, self.edge_attr_dim, device=next(self.parameters()).device)  # [1, F]
 
         return torch.stack(pooled_edges, dim=0).mean(dim=0)  # [B, F]
 

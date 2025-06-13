@@ -12,49 +12,133 @@ from typing import Dict, Tuple
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-def parse_batch_dict(batch: HeteroData)-> Tuple[
-        Dict[str, torch.Tensor],  # x_dict
-        Dict[Tuple[str, str, str], torch.Tensor],  # edge_index_dict
-        Dict[str, torch.Tensor],  # batch_dict
-        Dict[Tuple[str, str, str], torch.Tensor],  # edge_attr_dict
-        Dict[Tuple[str, str, str], torch.Tensor]   # edge_batch_dict
-        ]:
-    
+def parse_batch_dict(batch: HeteroData) -> Tuple[
+    Dict[str, torch.Tensor],  # x_dict
+    Dict[Tuple[str, str, str], torch.Tensor],  # edge_index_dict
+    Dict[str, torch.Tensor],  # batch_dict
+    Dict[Tuple[str, str, str], torch.Tensor],  # edge_attr_dict
+    Dict[Tuple[str, str, str], torch.Tensor]   # edge_batch_dict
+]:
+    """Extracts dictionaries for node features, edge indices, and batch vectors from batched HeteroData."""
+
     is_batched = any('batch' in batch[node_type] for node_type in batch.node_types)
 
     x_dict = {
         node_type: batch[node_type].x
         for node_type in batch.node_types if 'x' in batch[node_type]
     }
+
     edge_index_dict = {
         edge_type: batch[edge_type].edge_index
         for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
     }
-    edge_attr_dict = {
-        edge_type: batch[edge_type].edge_attr
-        for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
-    }
+
+    edge_attr_dict = {}
+    for edge_type in batch.edge_types:
+        if 'edge_attr' in batch[edge_type]:
+            edge_attr = batch[edge_type].edge_attr
+            # Convert sparse tensor to dense if needed
+            if edge_attr.is_sparse:
+                edge_attr = edge_attr.to_dense()  # Assumes shape [E, F]
+            elif edge_attr.dim() == 1:
+                edge_attr = edge_attr.unsqueeze(1)  # Convert to [E, 1]
+            edge_attr_dict[edge_type] = edge_attr
 
     if is_batched:
         batch_dict = {
             node_type: batch[node_type].batch
             for node_type in batch.node_types if 'batch' in batch[node_type]
         }
+
         edge_batch_dict = {
             edge_type: batch[edge_type].batch
             for edge_type in batch.edge_types if 'batch' in batch[edge_type]
         }
+
+        # In case batch info missing for edge but edge_attr exists
+        if not edge_batch_dict:
+            num_graphs = batch.num_graphs
+            for edge_type, edge_attr in edge_attr_dict.items():
+                E = edge_attr.size(0)
+                edge_batch_dict[edge_type] = (
+                    torch.arange(num_graphs, device=edge_attr.device)
+                    .repeat_interleave(E // num_graphs)[:E]
+                )
     else:
         batch_dict = {
-            node_type: torch.zeros(batch[node_type].x.size(0), dtype=torch.long, device=batch[node_type].x.device)
-            for node_type in x_dict
+            node_type: torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+            for node_type, x in x_dict.items()
         }
         edge_batch_dict = {
-            edge_type: torch.zeros(batch[edge_type].edge_attr.size(0), dtype=torch.long, device=batch[edge_type].edge_attr.device)
-            for edge_type in edge_attr_dict
+            edge_type: torch.zeros(edge_attr.size(0), dtype=torch.long, device=edge_attr.device)
+            for edge_type, edge_attr in edge_attr_dict.items()
         }
 
     return x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
+
+
+# def parse_batch_dict(batch: HeteroData)-> Tuple[
+#         Dict[str, torch.Tensor],  # x_dict
+#         Dict[Tuple[str, str, str], torch.Tensor],  # edge_index_dict
+#         Dict[str, torch.Tensor],  # batch_dict
+#         Dict[Tuple[str, str, str], torch.Tensor],  # edge_attr_dict
+#         Dict[Tuple[str, str, str], torch.Tensor]   # edge_batch_dict
+#         ]:
+    
+#     is_batched = any('batch' in batch[node_type] for node_type in batch.node_types)
+
+#     x_dict = {
+#         node_type: batch[node_type].x
+#         for node_type in batch.node_types if 'x' in batch[node_type]
+#     }
+#     edge_index_dict = {
+#         edge_type: batch[edge_type].edge_index
+#         for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
+#     }
+#     edge_attr_dict = {
+#         edge_type: batch[edge_type].edge_attr
+#         for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
+#     }
+
+#     if is_batched:
+#         batch_dict = {
+#             node_type: batch[node_type].batch
+#             for node_type in batch.node_types if 'batch' in batch[node_type]
+#         }
+#         edge_batch_dict = {
+#             edge_type: batch[edge_type].batch
+#             for edge_type in batch.edge_types if 'batch' in batch[edge_type]
+#         }
+
+#         # If edge_batch_dict is empty, construct manually
+#         if not edge_batch_dict:
+#             B = batch.label.size(0)
+#             for edge_type, edge_attr in edge_attr_dict.items():
+#                 if edge_attr.is_sparse:
+#                     # number of nonzero rows
+#                     E = edge_attr._nnz()
+#                 else:
+#                     E = edge_attr.size(0)
+#                 edge_batch_dict[edge_type] = (
+#                     torch.arange(B, device=edge_attr.device)
+#                     .repeat_interleave(E // B)[:E]
+#                 )
+#             # for debug
+
+#     else:
+#         batch_dict = {
+#             node_type: torch.zeros(batch[node_type].x.size(0), dtype=torch.long, device=batch[node_type].x.device)
+#             for node_type in x_dict
+#         }
+#         edge_batch_dict = {
+#             edge_type: torch.zeros(
+#                 batch[edge_type].edge_attr._nnz() if batch[edge_type].edge_attr.is_sparse else batch[edge_type].edge_attr.size(0),
+#                 dtype=torch.long,
+#                 device=batch[edge_type].edge_attr.device
+#             )
+#             for edge_type in edge_attr_dict}
+
+#     return x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
 
 
 def miss_check(x_dict, node_types, hidden_dim):

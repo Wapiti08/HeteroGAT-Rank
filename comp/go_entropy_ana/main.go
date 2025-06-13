@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 16:00:03
- * @ Modified time: 2025-06-10 15:58:17
+ * @ Modified time: 2025-06-13 11:45:32
  * @ Description: find malicious indicator in small-scale subgraphs
  */
 
@@ -66,6 +66,12 @@ func main() {
 
 	edgeEnt := CountEdgeValueEntropy(graphs)
 	SaveTopEntropy(edgeEnt, "result/top_edge_entropy.csv", 50)
+
+	nodeEntByEco := CountNodeValueEntropyByEco(graphs)
+	for eco, entMap := range nodeEntByEco {
+		outPath := fmt.Sprintf("result/node_entropy_%s.csv", eco)
+		SaveTopEntropy(entMap, outPath, 50)
+	}
 
 	close(done)
 

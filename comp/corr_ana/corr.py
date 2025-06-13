@@ -68,12 +68,9 @@ if __name__ == "__main__":
     fea_df = pd.read_csv(data_path)
     label_corr = overall_label_correlation(fea_df)
 
-    eco_top_features = per_eco_label_corr(fea_df)
+    eco_top_df= per_eco_label_corr(fea_df)
 
     print("\n[Overall correlation - Label=1]")
     print(label_corr.round(2))
 
-    for eco, mat in eco_top_features.items():
-        print(f"\n[Correlation in {eco}]")
-        print(mat.round(2))
-        break 
+    print(eco_top_df.head(10))

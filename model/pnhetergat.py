@@ -212,15 +212,14 @@ class PNHeteroGAT(torch.nn.Module):
 
         '''
         assert batch.label.size(0) > 1, "Only one graph in batch — check your DataLoader or dataset batching!"
-        print(f"[DEBUG] batch['Path'].batch.unique() = {batch['Path'].batch.unique()}")
 
         x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
 
-        for k, v in batch_dict.items():
-            print(f"[DEBUG] batch_dict[{k}]: shape = {v.shape}, unique = {torch.unique(v)}")
+        # for k, v in batch_dict.items():
+        #     print(f"[DEBUG] batch_dict[{k}]: shape = {v.shape}, unique = {torch.unique(v)}")
 
-        for k, v in edge_batch_dict.items():
-            print(f"[DEBUG] edge_batch_dict[{k}]: shape = {v.shape}, unique = {torch.unique(v)}")
+        # for k, v in edge_batch_dict.items():
+        #     print(f"[DEBUG] edge_batch_dict[{k}]: shape = {v.shape}, unique = {torch.unique(v)}")
 
         # convert global indices to local indices
         local_edge_index_dict_1 = self.to_local_edge_indices(x_dict, edge_index_dict)
@@ -260,7 +259,6 @@ class PNHeteroGAT(torch.nn.Module):
             else:
                 x_dict[node_type] = x
 
-
         # ---- Final node pooling (excluding Package_Name)
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
         batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
@@ -274,16 +272,12 @@ class PNHeteroGAT(torch.nn.Module):
         node_pool = node_pool.to(device)
         edge_pool = edge_pool.to(device)
         
-        print(f"[Pooling] node_pool: {node_pool.shape}, edge_pool: {edge_pool.shape}, expected batch size: {batch.label.size(0)}")
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
 
         logits = self.classifier(graph_embed).squeeze(-1)
-        print(logits)
-        print(f"logits shape: {logits.shape}")
         # Make sure logits and label have the same shape
         label = batch.label.view(-1)  # shape: [B]
-        print(f"logits shape: {logits.shape}, label shape: {label.shape}")
 
         # align with the shape
         # if logits.dim() == 0:
