@@ -5,6 +5,9 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from pathlib import Path
+import psutil
+import os
+import time
 
 def overall_label_correlation(features_df, label_column='Label', method="pearson", visualize=True):
     features_df[label_column] = features_df[label_column].astype(int)
@@ -66,11 +69,42 @@ def per_eco_label_corr(features_df, group_column='Ecosystem', label_column='Labe
 if __name__ == "__main__":
     data_path = Path.cwd().joinpath("feature_matrix.csv")
     fea_df = pd.read_csv(data_path)
+    start = time.time()
+
     label_corr = overall_label_correlation(fea_df)
+    eco_top_df = per_eco_label_corr(fea_df)
 
-    eco_top_df= per_eco_label_corr(fea_df)
+    # [新增] 统计每个 ecosystem 的 top-K correlation 方差
+    eco_var_result = {}
+    all_scores = []
 
-    print("\n[Overall correlation - Label=1]")
-    print(label_corr.round(2))
+    for eco, group in eco_top_df.groupby("Ecosystem"):
+        scores = group["Correlation"].abs().values
+        if len(scores) > 1:
+            var = np.var(scores)
+            eco_var_result[eco] = var
+            all_scores.extend(scores)
 
-    print(eco_top_df.head(10))
+    print(f"\n[Correlation Analysis] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
+    end = time.time()
+    print(f"Total time: {end - start:.2f} seconds")
+
+    valid_ecos = ["npm", "pypi", "ruby"]
+    filtered_scores = []
+    
+    print("\n[Top-K Correlation Variance Per Ecosystem]")
+    for eco, group in eco_top_df.groupby("Ecosystem"):
+        if eco not in valid_ecos:
+            continue
+        scores = group["Correlation"].abs().values
+        if len(scores) > 1:
+            var = np.var(scores)
+            eco_var_result[eco] = var
+            filtered_scores.extend(scores)
+            print(f"{eco}: {var:.6f}")
+    
+    if filtered_scores:
+        overall_variance = np.var(filtered_scores)
+        print(f"Overall (npm+pypi+ruby): {overall_variance:.6f}")
+    else:
+        print("Overall (npm+pypi+ruby): N/A (no valid features)")

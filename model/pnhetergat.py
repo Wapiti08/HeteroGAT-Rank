@@ -309,8 +309,8 @@ class PNHeteroGAT(torch.nn.Module):
         
         '''
         # define the default save name
-        roc_save_path = "roc_curve_maskheterogat.png"
-        metric_save_path = "metrics_bar_maskheterogat.png"
+        roc_save_path = "roc_curve_PNHeteroGAT.png"
+        metric_save_path = "metrics_bar_PNHeteroGAT.png"
 
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
