@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 13:52:37
- * @ Modified time: 2025-06-14 16:30:33
+ * @ Modified time: 2025-06-15 09:19:56
  * @ Description: implement Pixie Random Walk with Golang
  */
 
@@ -33,6 +33,27 @@ import (
   
 	  return ent
   }
+
+  type EntropyPair struct {
+	Key string
+	Val float64
+}
+
+func ExtractTopEntropy(entropyMap map[string]map[string]float64, topN int) []EntropyPair {
+	flat := []EntropyPair{}
+	for key, ecoMap := range entropyMap {
+		for _, val := range ecoMap {
+			flat = append(flat, EntropyPair{Key: key, Val: val})
+		}
+	}
+	sort.Slice(flat, func(i, j int) bool {
+		return flat[i].Val > flat[j].Val
+	})
+	if len(flat) > topN {
+		return flat[:topN]
+	}
+	return flat
+}
   
   func computeVariance(values []float64) float64 {
 	  n := float64(len(values))

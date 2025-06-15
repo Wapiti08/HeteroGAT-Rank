@@ -44,7 +44,7 @@ def per_eco_label_corr(features_df, group_column='Ecosystem', label_column='Labe
         group = group.copy()
         group[label_column] = group[label_column].astype(int)
         numeric_df = group.select_dtypes(include=[np.number])
-        if label_column not in numeric_df.columns or numeric_df.shape[0] < 5:
+        if label_column not in numeric_df.columns or numeric_df.shape[0] < 2:
             continue
 
         corr_matrix = numeric_df.corr(method=method)
@@ -74,7 +74,6 @@ if __name__ == "__main__":
     label_corr = overall_label_correlation(fea_df)
     eco_top_df = per_eco_label_corr(fea_df)
 
-    # [新增] 统计每个 ecosystem 的 top-K correlation 方差
     eco_var_result = {}
     all_scores = []
 
@@ -84,11 +83,7 @@ if __name__ == "__main__":
             var = np.var(scores)
             eco_var_result[eco] = var
             all_scores.extend(scores)
-
-    print(f"\n[Correlation Analysis] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
-    end = time.time()
-    print(f"Total time: {end - start:.2f} seconds")
-
+            
     valid_ecos = ["npm", "pypi", "ruby"]
     filtered_scores = []
     

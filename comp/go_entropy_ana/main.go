@@ -1,6 +1,6 @@
 /**
  * @ Create Time: 2024-12-26 16:00:03
- * @ Modified time: 2025-06-14 16:34:39
+ * @ Modified time: 2025-06-15 09:19:58
  * @ Description: find malicious indicator in subgraphs with entropy analysis
  */
 
@@ -83,7 +83,21 @@ import (
  
 	  ecoVariance := ComputeEntropyVariancePerEco(nodeEntEco)
 	  SaveTopVariance(ecoVariance, "result/eco_entropy_variance.csv", 50)
-  
+	  
+	  // Print top 10 nodes with highest entropy
+		fmt.Println("\n🔝 Top 10 Nodes by Entropy Score:")
+		topNodeEnt := ExtractTopEntropy(nodeEntEco, 10)
+		for _, item := range topNodeEnt {
+			fmt.Printf("Node: %s | Entropy: %.6f\n", item.Key, item.Val)
+		}
+
+		// Print top 10 edges with highest entropy
+		fmt.Println("\n🔝 Top 10 Edges by Entropy Score:")
+		topEdgeEnt := ExtractTopEntropy(edgeEntEco, 10)
+		for _, item := range topEdgeEnt {
+			fmt.Printf("Edge: %s | Entropy: %.6f\n", item.Key, item.Val)
+		}
+
 	  // ✅ Gracefully stop monitor and wait
 	  close(done)
 	  wg.Wait()
