@@ -10,22 +10,27 @@ from typing import Dict, Tuple, List
 from collections import defaultdict
 import random
 
-def get_contrastive_pairs(graph_embeds: torch.Tensor, labels: torch.Tensor):
+def get_contrastive_pairs(graph_embeds: torch.Tensor, labels: torch.Tensor, max_pairs=64):
     """
-    Randomly sample a positive and a negative pair from a batch.
+    Return multiple positive and negative pairs as (B, 2, D)
     """
     pos_pairs, neg_pairs = [], []
     B = graph_embeds.size(0)
     for i in range(B):
         for j in range(i + 1, B):
+            pair = torch.stack([graph_embeds[i], graph_embeds[j]], dim=0)  # shape [2, D]
             if labels[i] == labels[j]:
-                pos_pairs.append((graph_embeds[i], graph_embeds[j]))
+                pos_pairs.append(pair)
             else:
-                neg_pairs.append((graph_embeds[i], graph_embeds[j]))
+                neg_pairs.append(pair)
+
     if not pos_pairs or not neg_pairs:
         return None, None
-    return random.choice(pos_pairs), random.choice(neg_pairs)
 
+    pair_count = min(len(pos_pairs), len(neg_pairs), max_pairs)
+    pos_batch = torch.stack(random.sample(pos_pairs, pair_count))  # shape [N, 2, D]
+    neg_batch = torch.stack(random.sample(neg_pairs, pair_count))  # shape [N, 2, D]
+    return pos_batch, neg_batch
 
 class CompositeLoss(nn.Module):
     def __init__(self, lambda_contrastive=0.1, lambda_sparsity=0.01, lambda_entropy=0.01):
@@ -54,12 +59,11 @@ class CompositeLoss(nn.Module):
             pos_embed, neg_embed = get_contrastive_pairs(graph_embeds, labels)
 
         if pos_embed is not None and neg_embed is not None:
-            sim_pos = F.cosine_similarity(pos_embed[0], pos_embed[1], dim=1)
-            sim_neg = F.cosine_similarity(neg_embed[0], neg_embed[1], dim=1)
+            sim_pos = F.cosine_similarity(pos_embed[:, 0, :], pos_embed[:, 1, :], dim=1)  # (B,)
+            sim_neg = F.cosine_similarity(neg_embed[:, 0, :], neg_embed[:, 1, :], dim=1)  # (B,)
             contrastive_loss = F.relu(1.0 - sim_pos + sim_neg).mean()
             loss = loss + self.lambda_contrastive * contrastive_loss
             losses['contrastive'] = contrastive_loss * self.lambda_contrastive
-
         
         if attn_weights:
             entropy_loss = 0
