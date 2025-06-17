@@ -113,6 +113,9 @@ class PNHeteroGAT(torch.nn.Module):
         self.global_edge_atten_map = defaultdict(float)
         self.global_node_rank_map = defaultdict(float)
         self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
+        self.latest_attn_weights = {}
+        self.latest_edge_index_map = {}
+
 
         self.loss_fn = CompositeLoss(lambda_contrastive=0.0, lambda_sparsity=0.01, lambda_entropy=0.01)
 
@@ -173,6 +176,10 @@ class PNHeteroGAT(torch.nn.Module):
 
             # shape of alpha is [num_edges, num_heads]
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+            alpha.requires_grad_(True)
+            alpha.retain_grad()
+            self.latest_attn_weights[edge_type] = alpha
+            self.latest_edge_index_map[edge_type] = edge_index.T.tolist() 
 
             assert edge_index.shape[1] == alpha.shape[0], \
             f"Edge count mismatch: edge_index has {edge_index.shape[1]}, but alpha has {alpha.shape[0]}"

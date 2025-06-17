@@ -70,7 +70,7 @@ class CompositeLoss(nn.Module):
             sparsity_loss = 0
             for w in attn_weights.values():
                 a = F.softmax(w.mean(dim=1), dim=0)
-                entropy_loss += -(a*torch.log(a+1e-6)).sum()
+                entropy_loss += -(a * torch.log(a+1e-6)).sum()
                 sparsity_loss += w.abs().sum()
             
             entropy_loss = self.lambda_entropy * entropy_loss

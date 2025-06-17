@@ -63,6 +63,8 @@ class HeterGAT(torch.nn.Module):
         self.global_edge_atten_map = defaultdict(float)
         self.global_node_rank_map = defaultdict(float)
         self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
+        self.latest_attn_weights = {}
+        self.latest_edge_index_map = {}
 
         # dynamic track the number of in_channels
         self.classifier = LazyLinear(1)
@@ -113,6 +115,10 @@ class HeterGAT(torch.nn.Module):
 
             # shape of alpha is [num_edges, num_heads]
             out, (_, alpha) = conv((x_src, x_tgt), local_edge_index, return_attention_weights=True)
+            alpha.requires_grad_(True)
+            alpha.retain_grad()
+            self.latest_attn_weights[edge_type] = alpha
+            self.latest_edge_index_map[edge_type] = edge_index.T.tolist() 
 
             assert local_edge_index.shape[1] == alpha.shape[0], \
             f"Edge count mismatch: edge_index has {local_edge_index.shape[1]}, but alpha has {alpha.shape[0]}"

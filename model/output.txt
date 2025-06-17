@@ -1,22 +1,39 @@
-For HeteroGAT Model: Epoch 1/10, Loss: 0.0106
-For HeteroGAT Model: Epoch 2/10, Loss: 0.0000
-For HeteroGAT Model: Epoch 3/10, Loss: 0.0000
-For HeteroGAT Model: Epoch 4/10, Loss: 0.0000
-For HeteroGAT Model: Epoch 5/10, Loss: 0.0001
-For HeteroGAT Model: Epoch 6/10, Loss: 0.0001
-For HeteroGAT Model: Epoch 7/10, Loss: 0.0001
-For HeteroGAT Model: Epoch 8/10, Loss: 0.0001
-For HeteroGAT Model: Epoch 9/10, Loss: 0.0001
-For HeteroGAT Model: Epoch 10/10, Loss: 0.0001
-Warning: ('Package_Name', 'Action', 'Path') not found in edge_index_map. Skipping.
-Warning: ('Package_Name', 'DNS', 'DNS Host') not found in edge_index_map. Skipping.
-Warning: ('Package_Name', 'CMD', 'Command') not found in edge_index_map. Skipping.
-Warning: ('Package_Name', 'socket', 'IP') not found in edge_index_map. Skipping.
-Warning: ('Package_Name', 'socket', 'Port') not found in edge_index_map. Skipping.
-{('Package_Name', 'Action', 'Path'): [], ('Package_Name', 'DNS', 'DNS Host'): [], ('Package_Name', 'CMD', 'Command'): [], ('Package_Name', 'socket', 'IP'): [], ('Package_Name', 'socket', 'Port'): []}
-{'npm': ['@open-wa/wa-automate_4.32.16', 'helpers/arrayLikeToArray.js', 'helpers/arrayWithHoles.js', 'helpers/assertThisInitialized.js', 'helpers/asyncToGenerator.js', 'custom/package.json', 'custom/trap.js', 'custom/zalgo.js', 'maps/america.js', 'maps/package.json']}
-['@open-wa/wa-automate_4.32.16', 'helpers/arrayLikeToArray.js', 'helpers/arrayWithHoles.js', 'helpers/assertThisInitialized.js', 'helpers/asyncToGenerator.js', 'custom/package.json', 'custom/trap.js', 'custom/zalgo.js', 'maps/america.js', 'maps/package.json']
-{'top_k_edges': {('Package_Name', 'Action', 'Path'): [], ('Package_Name', 'DNS', 'DNS Host'): [], ('Package_Name', 'CMD', 'Command'): [], ('Package_Name', 'socket', 'IP'): [], ('Package_Name', 'socket', 'Port'): []}, 'top_k_nodes_by_eco': {'npm': ['@open-wa/wa-automate_4.32.16', 'helpers/arrayLikeToArray.js', 'helpers/arrayWithHoles.js', 'helpers/assertThisInitialized.js', 'helpers/asyncToGenerator.js', 'custom/package.json', 'custom/trap.js', 'custom/zalgo.js', 'maps/america.js', 'maps/package.json']}, 'top_k_global_nodes': ['@open-wa/wa-automate_4.32.16', 'helpers/arrayLikeToArray.js', 'helpers/arrayWithHoles.js', 'helpers/assertThisInitialized.js', 'helpers/asyncToGenerator.js', 'custom/package.json', 'custom/trap.js', 'custom/zalgo.js', 'maps/america.js', 'maps/package.json'], 'final_selected_nodes': ['custom/zalgo.js', 'helpers/asyncToGenerator.js', '@open-wa/wa-automate_4.32.16', 'helpers/assertThisInitialized.js', 'maps/package.json', 'custom/trap.js', 'maps/america.js', 'custom/package.json', 'helpers/arrayLikeToArray.js', 'helpers/arrayWithHoles.js'], 'final_selected_edges': {('Package_Name', 'Action', 'Path'): [], ('Package_Name', 'DNS', 'DNS Host'): [], ('Package_Name', 'CMD', 'Command'): [], ('Package_Name', 'socket', 'IP'): [], ('Package_Name', 'socket', 'Port'): []}}
+For HeteroGAT Model: Epoch 1, Loss: 0.28111975730169286
+For HeteroGAT Model: Epoch 2, Loss: 0.21522315939146378
+For HeteroGAT Model: Epoch 3, Loss: 0.19063584304310394
+For HeteroGAT Model: Epoch 4, Loss: 0.1763938556388566
+
+For HeteroGAT Model: Epoch 5, Loss: 0.16167178763688633
+For HeteroGAT Model: Epoch 6, Loss: 0.14914393088425917
+For HeteroGAT Model: Epoch 7, Loss: 0.13962845867813242
+For HeteroGAT Model: Epoch 8, Loss: 0.12863965203862016
+For HeteroGAT Model: Epoch 9, Loss: 0.12189243368073995
+For HeteroGAT Model: Epoch 10, Loss: 0.11185059590200258
+For HeteroGAT Model: Epoch 11, Loss: 0.10361009323123574
+For HeteroGAT Model: Epoch 12, Loss: 0.0940072772219526
+For HeteroGAT Model: Epoch 13, Loss: 0.09006129007920863
+For HeteroGAT Model: Epoch 14, Loss: 0.0838633028371353
+For HeteroGAT Model: Epoch 15, Loss: 0.07768616636820753
+
+
+[HeteroGAT] Peak GPU memory: 4133.05 MB
+[HeteroGAT] Peak GPU reserved: 6782.00 MB
+[HeteroGAT] CPU memory usage (RSS): 328932.04 MB
+top k edges are: {('Package_Name', 'Action', 'Path'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'DNS', 'DNS Host'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'CMD', 'Command'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_ip', 'IP'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_port', 'Port'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_host', 'Hostnames'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)]}
+top k nodes by ecosystem are: {'pypi': [('fakerv2_1.0', 1.0)]}
+top global k edges are: [('fakerv2_1.0', 1.0)]
+final ranked results: {'top_k_edges': {('Package_Name', 'Action', 'Path'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'DNS', 'DNS Host'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'CMD', 'Command'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_ip', 'IP'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_port', 'Port'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_host', 'Hostnames'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)]}, 'top_k_nodes_by_eco': {'pypi': [('fakerv2_1.0', 1.0)]}, 'top_k_global_nodes': [('fakerv2_1.0', 1.0)], 'final_selected_nodes': ['fakerv2_1.0'], 'final_selected_edges': {('Package_Name', 'Action', 'Path'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'DNS', 'DNS Host'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'CMD', 'Command'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_ip', 'IP'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_port', 'Port'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_host', 'Hostnames'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)]}}
+[Warning] No gradient for edge_type=('Package_Name', 'Action', 'Path')
+[Warning] No gradient for edge_type=('Package_Name', 'DNS', 'DNS Host')
+[Warning] No gradient for edge_type=('Package_Name', 'CMD', 'Command')
+[Warning] No gradient for edge_type=('Package_Name', 'socket_ip', 'IP')
+[Warning] No gradient for edge_type=('Package_Name', 'socket_port', 'Port')
+[Warning] No gradient for edge_type=('Package_Name', 'socket_host', 'Hostnames')
+edge score map is: {}
+node score map is: {}
 evaluation result: 
- {'accuracy': 1.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'auc': nan}
-Evaluation Metrics for HeteroGAT model:  {'accuracy': 1.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'auc': nan}
+ {'accuracy': 0.9323770491803278, 'precision': 0.8636363636363636, 'recall': 0.8407079646017699, 'f1': 0.852017937219731, 'auc': 0.9633274336283186}
+Evaluation Metrics for HeteroGAT model:  {'accuracy': 0.9323770491803278, 'precision': 0.8636363636363636, 'recall': 0.8407079646017699, 'f1': 0.852017937219731, 'auc': 0.9633274336283186}
+Time spent for HeteroGAT (train and evaluate): 16 hours, 55 minutes, 35 seconds
+
+
