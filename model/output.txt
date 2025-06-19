@@ -1,39 +1,29 @@
-For HeteroGAT Model: Epoch 1, Loss: 0.28111975730169286
-For HeteroGAT Model: Epoch 2, Loss: 0.21522315939146378
-For HeteroGAT Model: Epoch 3, Loss: 0.19063584304310394
-For HeteroGAT Model: Epoch 4, Loss: 0.1763938556388566
-
-For HeteroGAT Model: Epoch 5, Loss: 0.16167178763688633
-For HeteroGAT Model: Epoch 6, Loss: 0.14914393088425917
-For HeteroGAT Model: Epoch 7, Loss: 0.13962845867813242
-For HeteroGAT Model: Epoch 8, Loss: 0.12863965203862016
-For HeteroGAT Model: Epoch 9, Loss: 0.12189243368073995
-For HeteroGAT Model: Epoch 10, Loss: 0.11185059590200258
-For HeteroGAT Model: Epoch 11, Loss: 0.10361009323123574
-For HeteroGAT Model: Epoch 12, Loss: 0.0940072772219526
-For HeteroGAT Model: Epoch 13, Loss: 0.09006129007920863
-For HeteroGAT Model: Epoch 14, Loss: 0.0838633028371353
-For HeteroGAT Model: Epoch 15, Loss: 0.07768616636820753
-
-
-[HeteroGAT] Peak GPU memory: 4133.05 MB
-[HeteroGAT] Peak GPU reserved: 6782.00 MB
-[HeteroGAT] CPU memory usage (RSS): 328932.04 MB
+For HeteroGAT Model: Epoch 1, Loss: 0.28235148183496234
+For HeteroGAT Model: Epoch 2, Loss: 0.21851253118050543
+For HeteroGAT Model: Epoch 3, Loss: 0.19510613627951914
+For HeteroGAT Model: Epoch 4, Loss: 0.1806623389700099
+For HeteroGAT Model: Epoch 5, Loss: 0.16690479777153466
+For HeteroGAT Model: Epoch 6, Loss: 0.15504984452115758
+For HeteroGAT Model: Epoch 7, Loss: 0.14873886627858204
+For HeteroGAT Model: Epoch 8, Loss: 0.1378282108668358
+For HeteroGAT Model: Epoch 9, Loss: 0.12282226694481094
+For HeteroGAT Model: Epoch 10, Loss: 0.11595965667081441
+For HeteroGAT Model: Epoch 11, Loss: 0.11116203542320394
+For HeteroGAT Model: Epoch 12, Loss: 0.09965361637164165
+For HeteroGAT Model: Epoch 13, Loss: 0.09237786752869692
+For HeteroGAT Model: Epoch 14, Loss: 0.084519192990006
+For HeteroGAT Model: Epoch 15, Loss: 0.0727259155586917
+[HeteroGAT] Peak GPU memory: 4133.82 MB
+[HeteroGAT] Peak GPU reserved: 7214.00 MB
+[HeteroGAT] CPU memory usage (RSS): 329256.81 MB
 top k edges are: {('Package_Name', 'Action', 'Path'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'DNS', 'DNS Host'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'CMD', 'Command'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_ip', 'IP'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_port', 'Port'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_host', 'Hostnames'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)]}
 top k nodes by ecosystem are: {'pypi': [('fakerv2_1.0', 1.0)]}
 top global k edges are: [('fakerv2_1.0', 1.0)]
 final ranked results: {'top_k_edges': {('Package_Name', 'Action', 'Path'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'DNS', 'DNS Host'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'CMD', 'Command'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_ip', 'IP'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_port', 'Port'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_host', 'Hostnames'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)]}, 'top_k_nodes_by_eco': {'pypi': [('fakerv2_1.0', 1.0)]}, 'top_k_global_nodes': [('fakerv2_1.0', 1.0)], 'final_selected_nodes': ['fakerv2_1.0'], 'final_selected_edges': {('Package_Name', 'Action', 'Path'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'DNS', 'DNS Host'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'CMD', 'Command'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_ip', 'IP'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_port', 'Port'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)], ('Package_Name', 'socket_host', 'Hostnames'): [(('fakerv2_1.0', 'fakerv2_1.0'), 1.0)]}}
-[Warning] No gradient for edge_type=('Package_Name', 'Action', 'Path')
-[Warning] No gradient for edge_type=('Package_Name', 'DNS', 'DNS Host')
-[Warning] No gradient for edge_type=('Package_Name', 'CMD', 'Command')
-[Warning] No gradient for edge_type=('Package_Name', 'socket_ip', 'IP')
-[Warning] No gradient for edge_type=('Package_Name', 'socket_port', 'Port')
-[Warning] No gradient for edge_type=('Package_Name', 'socket_host', 'Hostnames')
-edge score map is: {}
-node score map is: {}
+Top edges: [((('Package_Name', 'DNS', 'DNS Host'), (0, 0)), 1.0343006998300552), ((('Package_Name', 'socket_port', 'Port'), (0, 0)), 0.678944930434227), ((('Package_Name', 'socket_host', 'Hostnames'), (0, 0)), 0.6682337112724781), ((('Package_Name', 'socket_ip', 'IP'), (0, 0)), 3.0590934386509616e-05), ((('Package_Name', 'CMD', 'Command'), (0, 0)), 3.582470810670202e-06), ((('Package_Name', 'Action', 'Path'), (0, 0)), 2.822671246044406e-10)]
+Top nodes: [(0, 4.763027030448449)]
 evaluation result: 
- {'accuracy': 0.9323770491803278, 'precision': 0.8636363636363636, 'recall': 0.8407079646017699, 'f1': 0.852017937219731, 'auc': 0.9633274336283186}
-Evaluation Metrics for HeteroGAT model:  {'accuracy': 0.9323770491803278, 'precision': 0.8636363636363636, 'recall': 0.8407079646017699, 'f1': 0.852017937219731, 'auc': 0.9633274336283186}
-Time spent for HeteroGAT (train and evaluate): 16 hours, 55 minutes, 35 seconds
-
+ {'accuracy': 0.9236680327868853, 'precision': 0.8778054862842892, 'recall': 0.7787610619469026, 'f1': 0.8253223915592028, 'auc': np.float64(0.9581356932153393)}
+Evaluation Metrics for HeteroGAT model:  {'accuracy': 0.9236680327868853, 'precision': 0.8778054862842892, 'recall': 0.7787610619469026, 'f1': 0.8253223915592028, 'auc': np.float64(0.9581356932153393)}
+Time spent for HeteroGAT (train and evaluate): 16 hours, 50 minutes, 40 seconds
 

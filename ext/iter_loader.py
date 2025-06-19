@@ -93,10 +93,22 @@ class IterSubGraphs(Dataset):
         return len(self.file_list)
 
 
+def to_dense_safe(data):
+    # Loop through all node types and edge types
+    for key in data.node_types:
+        if hasattr(data[key], 'x') and torch.is_tensor(data[key].x) and data[key].x.is_sparse:
+            data[key].x = data[key].x.to_dense()
+    for edge_type in data.edge_types:
+        if hasattr(data[edge_type], 'edge_index') and torch.is_tensor(data[edge_type].edge_index) and data[edge_type].edge_index.is_sparse:
+            data[edge_type].edge_index = data[edge_type].edge_index.to_dense().long()
+        if hasattr(data[edge_type], 'edge_attr') and torch.is_tensor(data[edge_type].edge_attr) and data[edge_type].edge_attr.is_sparse:
+            data[edge_type].edge_attr = data[edge_type].edge_attr.to_dense()
+    return data
+
 # Custom collate function to handle HeteroData objects
 def collate_hetero_data(batch):
     """Custom collate function to handle batching of HeteroData objects."""
-    return Batch.from_data_list(batch)
+    return Batch.from_data_list([to_dense_safe(data) for data in batch])
 
 if __name__ == "__main__":
 

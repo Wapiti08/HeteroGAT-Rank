@@ -218,10 +218,10 @@ def remap_edge_indices(edge_index, global_to_local_mapping, src_type, tgt_type):
             s_item = s.item()
             t_item = t.item()
             
-            if s_item in src_map and t_item in tgt_map:
+            # filter out self-loop
+            if s_item in src_map and t_item in tgt_map and src_map[s_item] != tgt_map[t_item]:
                 src_local.append(src_map[s_item])
                 tgt_local.append(tgt_map[t_item])
-            # else: skip the edge completely
 
     return torch.tensor([src_local, tgt_local], dtype=torch.long, device=edge_index.device)
 

@@ -9,74 +9,74 @@ import torch.nn.functional as F
 from typing import Dict, Tuple, List
 from collections import defaultdict
 
-def compute_edge_import(attn_weights: Dict[str, torch.Tensor],
-                        edge_index_map: Dict[str, List[Tuple[str, str]]],
-                        logits: torch.Tensor,
-                        target_class: int) -> Dict[str, List[Tuple[Tuple[str, str], float]]]:
-    """
-    compute edge importance via Grad-CAM-like method: attention * gradient
-    """
-    edge_score_map = {}
-    grads_storage = {}
+# def compute_edge_import(attn_weights: Dict[str, torch.Tensor],
+#                         edge_index_map: Dict[str, List[Tuple[str, str]]],
+#                         logits: torch.Tensor,
+#                         target_class: int) -> Dict[str, List[Tuple[Tuple[str, str], float]]]:
+#     """
+#     compute edge importance via Grad-CAM-like method: attention * gradient
+#     """
+#     edge_score_map = {}
+#     grads_storage = {}
 
-    # register hook to store gradients
-    for edge_type, attn in attn_weights.items():
-        if attn.requires_grad:
-            attn.register_hook(lambda grad, et=edge_type: grads_storage.setdefault(et, grad))
-        else:
-            attn.retain_grad()
-            attn.register_hook(lambda grad, et=edge_type: grads_storage.setdefault(et, grad))
+#     # register hook to store gradients
+#     for edge_type, attn in attn_weights.items():
+#         if attn.requires_grad:
+#             attn.register_hook(lambda grad, et=edge_type: grads_storage.setdefault(et, grad))
+#         else:
+#             attn.retain_grad()
+#             attn.register_hook(lambda grad, et=edge_type: grads_storage.setdefault(et, grad))
 
-    # ensure logits is scalar
-    if logits.numel() == 1:
-        loss = logits.squeeze()
-    elif logits.dim() == 2:
-        loss = logits[:, target_class].sum()
-    elif logits.dim() == 1:
-        loss = logits[target_class]
-    else:
-        raise ValueError("Unexpected logits shape")
+#     # ensure logits is scalar
+#     if logits.numel() == 1:
+#         loss = logits.squeeze()
+#     elif logits.dim() == 2:
+#         loss = logits[:, target_class].sum()
+#     elif logits.dim() == 1:
+#         loss = logits[target_class]
+#     else:
+#         raise ValueError("Unexpected logits shape")
     
-    # backprop to populate gradients
-    loss.backward(retain_graph=True)
+#     # backprop to populate gradients
+#     loss.backward(retain_graph=True)
 
-    for edge_type, alpha in attn_weights.items():
-        grad = grads_storage.get(edge_type, None)
-        if grad is None:
-            print(f"[Warning] No gradient for edge_type={edge_type}")
-            continue
+#     for edge_type, alpha in attn_weights.items():
+#         grad = grads_storage.get(edge_type, None)
+#         if grad is None:
+#             print(f"[Warning] No gradient for edge_type={edge_type}")
+#             continue
     
-        mean_weights = alpha.mean(dim=1)
-        mean_grad = grad.mean(dim=1)
-        importance = (mean_weights * mean_grad).abs()
+#         mean_weights = alpha.mean(dim=1)
+#         mean_grad = grad.mean(dim=1)
+#         importance = (mean_weights * mean_grad).abs()
 
-        edge_list = edge_index_map.get(edge_type, [])
-        edge_scores = [
-            (edge_list[i], round(score.item(), 6))
-            for i, score in enumerate(importance)
-            if i < len(edge_list)
-        ]
-        edge_scores.sort(key=lambda x: x[1], reverse=True)
-        edge_score_map[edge_type] = edge_scores
+#         edge_list = edge_index_map.get(edge_type, [])
+#         edge_scores = [
+#             (edge_list[i], round(score.item(), 6))
+#             for i, score in enumerate(importance)
+#             if i < len(edge_list)
+#         ]
+#         edge_scores.sort(key=lambda x: x[1], reverse=True)
+#         edge_score_map[edge_type] = edge_scores
 
-    return edge_score_map
+#     return edge_score_map
 
 
-def compute_node_import(edge_score_map: Dict[str, List[Tuple[Tuple[str, str], float]]]) -> Dict[str, float]:
-    """ aggregate edge importance scores to node-level importance
+# def compute_node_import(edge_score_map: Dict[str, List[Tuple[Tuple[str, str], float]]]) -> Dict[str, float]:
+#     """ aggregate edge importance scores to node-level importance
 
-    args:
-        edge_score_map: dict of {edge_type: list of ((src, tgt), score)}
+#     args:
+#         edge_score_map: dict of {edge_type: list of ((src, tgt), score)}
     
-    returns:
-        node_score_map: dict {node_value: aggregated importance score}
-    """
-    node_score_map = defaultdict(float)
-    for edge_type, edge_scores in edge_score_map.items():
-        for (src, tgt), score in edge_scores:
-            node_score_map[src] += score
-            node_score_map[tgt] += score
-    return dict(node_score_map)
+#     returns:
+#         node_score_map: dict {node_value: aggregated importance score}
+#     """
+#     node_score_map = defaultdict(float)
+#     for edge_type, edge_scores in edge_score_map.items():
+#         for (src, tgt), score in edge_scores:
+#             node_score_map[src] += score
+#             node_score_map[tgt] += score
+#     return dict(node_score_map)
 
 
 def explain_with_gradcam(model, dataloader, device, target_class=1, max_batches=None):
