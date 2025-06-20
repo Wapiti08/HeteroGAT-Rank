@@ -18,7 +18,6 @@ from sklearn.preprocessing import MinMaxScaler
 from collections import defaultdict
 import pandas as pd
 
-device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 def rank_edges(atten_weights, edge_index_map, k:int, noise_factor:float):
     ''' rank top-k edges for each edge_type based on averaged attention weights
@@ -41,12 +40,11 @@ def rank_edges(atten_weights, edge_index_map, k:int, noise_factor:float):
             continue
 
         # Compute the mean attention weight for each edge across all heads
-        mean_weights = weights.mean(dim=1).to(device)  # shape: [num_edges]
+        mean_weights = weights.mean(dim=1).cpu()  # shape: [num_edges]
 
         # add random noise to break ties in case of identical attention weights
         if noise_factor:
             noise = torch.randn(mean_weights.shape) * noise_factor
-            noise = noise.to(device)
             mean_weights = mean_weights + noise
 
         # sort the edges by their mean attention weight
@@ -81,6 +79,12 @@ def rank_nodes_by_eco_system(edge_atten_map, node_json:list, k):
 
     '''
     # Create a dictionary to store attention scores by eco_system and tgt_node_value
+    value_to_eco = {
+        node["value"]: node["eco"]
+        for node in node_json
+        if "value" in node and "eco" in node
+    }
+
     eco_system_rank_map = defaultdict(lambda: defaultdict(float))
 
     df = pd.DataFrame(node_json)
@@ -88,11 +92,11 @@ def rank_nodes_by_eco_system(edge_atten_map, node_json:list, k):
     # aggregate attention weights for each node based on its adjacent edges
     for (src_node_value, tgt_node_value), attn_weight in edge_atten_map.items():
         # Find the eco_system for this node type in the DataFrame
-        src_node_eco = df[df['value'] == src_node_value]['eco'].values
-        if len(src_node_eco) == 0:
-            continue  # Skip if eco_system for source node is not found
-        src_node_eco = src_node_eco[0]  # Assuming the eco_system is unique for each node
-        # Aggregate attention score by eco_system for tgt_node_value
+        # src_node_eco = df[df['value'] == src_node_value]['eco'].values
+        src_node_eco = value_to_eco.get(src_node_value)
+
+        if src_node_eco is None:
+            continue
         eco_system_rank_map[src_node_eco][tgt_node_value] += attn_weight
 
     # Sort and get top k nodes per eco_system

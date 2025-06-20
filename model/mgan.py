@@ -23,20 +23,10 @@ from torch_geometric.utils import to_dense_batch
 import json
 import psutil
 import os
-from accelerate import Accelerator
-from accelerate.utils import DistributedDataParallelKwargs
 
-accelerator = Accelerator(device_placement=True)
 
-# important to track unused parameters to avoid errors
-if torch.cuda.device_count() > 1:
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
-else:
-    accelerator = Accelerator()
-
-device = accelerator.device
-
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 torch.cuda.reset_peak_memory_stats(device)
 # predefined node types
 node_types = ["Path", "DNS Host", "Hostnames", "Package_Name", "IP", "Command", "Port"]
@@ -186,241 +176,236 @@ if __name__ == "__main__":
 
     torch.save(model2.state_dict(), "heterogat_model_state.pth")
 
-    print("-----------------------------------------------")
-    print("Training DiffHeteroGAT ...")
-    batch = next(iter(train_loader))
-    model_name = "DiffHeteroGAT"
-    # Initialize model with required parameters
-    model1 = DiffHeteroGAT(
-        # default is 400
-        # in_channels= list(batch.num_node_features.values())[0],
-        # in_channels= 256,
-        hidden_channels=64, 
-        edge_attr_dim=16, 
-        num_heads=4, 
-        processed_dir=data_path
-    ).to(device)
+    # print("-----------------------------------------------")
+    # print("Training DiffHeteroGAT ...")
+    # batch = next(iter(train_loader))
+    # model_name = "DiffHeteroGAT"
+    # # Initialize model with required parameters
+    # model1 = DiffHeteroGAT(
+    #     # default is 400
+    #     # in_channels= list(batch.num_node_features.values())[0],
+    #     # in_channels= 256,
+    #     hidden_channels=64, 
+    #     edge_attr_dim=16, 
+    #     num_heads=4, 
+    #     processed_dir=data_path
+    # ).to(device)
 
-    optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
+    # optimizer = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
-    # define the starting time
-    start_time = datetime.now()
-    loss_list = []
-    for epoch in range(num_epochs):
-        total_loss = 0
-        for batch in train_loader:
+    # # define the starting time
+    # start_time = datetime.now()
+    # loss_list = []
+    # for epoch in range(num_epochs):
+    #     total_loss = 0
+    #     for batch in train_loader:
             
-            batch=batch.to(device)
+    #         batch=batch.to(device)
 
-            optimizer.zero_grad()
-            logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
+    #         optimizer.zero_grad()
+    #         logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
 
-            total_loss += loss.item()
-            loss.backward()
-            optimizer.step()
+    #         total_loss += loss.item()
+    #         loss.backward()
+    #         optimizer.step()
 
-        avg_loss = total_loss / len(train_loader)
-        loss_list.append(avg_loss)
+    #     avg_loss = total_loss / len(train_loader)
+    #     loss_list.append(avg_loss)
 
-        print(f"For {model_name} Model: Epoch {epoch+1}, Loss: {avg_loss}")
+    #     print(f"For {model_name} Model: Epoch {epoch+1}, Loss: {avg_loss}")
 
-    plot_loss_curve(loss_list,f"{model_name}")
+    # plot_loss_curve(loss_list,f"{model_name}")
 
-    # After training
-    print(f"[{model_name}] Peak GPU memory: {torch.cuda.max_memory_allocated(device)/1024**2:.2f} MB")
-    print(f"[{model_name}] Peak GPU reserved: {torch.cuda.max_memory_reserved(device)/1024**2:.2f} MB")
-    print(f"[{model_name}] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
+    # # After training
+    # print(f"[{model_name}] Peak GPU memory: {torch.cuda.max_memory_allocated(device)/1024**2:.2f} MB")
+    # print(f"[{model_name}] Peak GPU reserved: {torch.cuda.max_memory_reserved(device)/1024**2:.2f} MB")
+    # print(f"[{model_name}] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
 
-    # rank last conv_weight_dict
-    top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
-    print("top k edges are:", top_k_edges)
-    # rank node by eco system
-    top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
-    print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
-    # rank node globally
-    top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
-    print("top global k edges are:", top_k_global_nodes)
-    # final rank
-    print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
+    # # rank last conv_weight_dict
+    # top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
+    # print("top k edges are:", top_k_edges)
+    # # rank node by eco system
+    # top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
+    # print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
+    # # rank node globally
+    # top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
+    # print("top global k edges are:", top_k_global_nodes)
+    # # final rank
+    # print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-    # edge_score_map = explain.compute_edge_import(attn_weights_pooled, edge_index_map_pool, logits, target_class=1)
-    # print("edge score map is:", edge_score_map)
-    # node_score_map = explain.compute_node_import(edge_score_map)
-    # print("node score map is:", edge_score_map)
+    # # edge_score_map = explain.compute_edge_import(attn_weights_pooled, edge_index_map_pool, logits, target_class=1)
+    # # print("edge score map is:", edge_score_map)
+    # # node_score_map = explain.compute_node_import(edge_score_map)
+    # # print("node score map is:", edge_score_map)
 
-    edge_scores, node_scores = explain.explain_with_gradcam(
-        model=model1,
-        dataloader=train_loader,
-        device=device,
-        target_class=1,
-        max_batches=5  # to limit time/memory
-        )
+    # edge_scores, node_scores = explain.explain_with_gradcam(
+    #     model=model1,
+    #     dataloader=train_loader,
+    #     device=device,
+    #     target_class=1,
+    #     max_batches=5  # to limit time/memory
+    #     )
 
-    print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
-    print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
+    # print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
+    # print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
 
-    # --- Evaluation -----
-    model1.eval()
-    all_logits = []
-    all_labels = []
+    # # --- Evaluation -----
+    # model1.eval()
+    # all_logits = []
+    # all_labels = []
 
-    with torch.no_grad():
-        for batch in test_loader:
-            batch = batch.to(next(model1.parameters()).device)
-            logits, _, _, _ ,_ = model1(batch)
-            all_logits.append(logits)
-            all_labels.append(batch['label'])
+    # with torch.no_grad():
+    #     for batch in test_loader:
+    #         batch = batch.to(next(model1.parameters()).device)
+    #         logits, _, _, _ ,_ = model1(batch)
+    #         all_logits.append(logits)
+    #         all_labels.append(batch['label'])
     
-    # Concatenate
-    all_logits = torch.cat(all_logits)
-    all_labels = torch.cat(all_labels)
+    # # Concatenate
+    # all_logits = torch.cat(all_logits)
+    # all_labels = torch.cat(all_labels)
 
-    # Compute metrics
-    metrics = model1.evaluate(all_logits, all_labels)
+    # # Compute metrics
+    # metrics = model1.evaluate(all_logits, all_labels)
 
-    print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
+    # print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
 
-    model1.plot_metrics(
-        all_labels,
-        torch.sigmoid(all_logits).cpu().numpy(),
-        metrics)
+    # model1.plot_metrics(
+    #     all_labels,
+    #     torch.sigmoid(all_logits).cpu().numpy(),
+    #     metrics)
 
-    time_spent = datetime.now() - start_time
-    hours, remainder = divmod(time_spent.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    print(f"Time spent for DiffHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
+    # time_spent = datetime.now() - start_time
+    # hours, remainder = divmod(time_spent.total_seconds(), 3600)
+    # minutes, seconds = divmod(remainder, 60)
+    # print(f"Time spent for DiffHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
-    # save the model after training
-    torch.save(model1.state_dict(), "diff_heterogat_model.pth")
+    # # save the model after training
+    # torch.save(model1.state_dict(), "diff_heterogat_model.pth")
 
-    print("-----------------------------------------------")
-    print("Training PNHeteroGAT ...")
-    model_name = "PNHeteroGAT"
-    # Initialize model with required parameters
-    model3 = PNHeteroGAT(
-        # default is 400
-        # in_channels= list(batch.num_node_features.values())[0],
-        # in_channels= 256,
-        hidden_channels=64, 
-        edge_attr_dim=16,
-        num_heads=4, 
-        processed_dir=data_path
-    ).to(device)
+    # print("-----------------------------------------------")
+    # print("Training PNHeteroGAT ...")
+    # model_name = "PNHeteroGAT"
+    # # Initialize model with required parameters
+    # model3 = PNHeteroGAT(
+    #     # default is 400
+    #     # in_channels= list(batch.num_node_features.values())[0],
+    #     # in_channels= 256,
+    #     hidden_channels=64, 
+    #     edge_attr_dim=16,
+    #     num_heads=4, 
+    #     processed_dir=data_path
+    # ).to(device)
 
-    optimizer = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
-    # have to use batch_size larger than 1 for constrative loss computation
-    train_loader = DataLoader(
-        train_data,
-        batch_size=4,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=None,
-        collate_fn=collate_hetero_data,
-        drop_last=True
-    )
+    # optimizer = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
+    # # have to use batch_size larger than 1 for constrative loss computation
+    # train_loader = DataLoader(
+    #     train_data,
+    #     batch_size=4,
+    #     shuffle=True,
+    #     pin_memory=False,
+    #     prefetch_factor=None,
+    #     collate_fn=collate_hetero_data,
+    #     drop_last=True
+    # )
 
-    test_loader = DataLoader(
-        test_data,
-        batch_size=4,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=None,
-        collate_fn=collate_hetero_data,
-        drop_last=True
-    )
+    # test_loader = DataLoader(
+    #     test_data,
+    #     batch_size=4,
+    #     shuffle=True,
+    #     pin_memory=False,
+    #     prefetch_factor=None,
+    #     collate_fn=collate_hetero_data,
+    #     drop_last=True
+    # )
 
-    # define the starting time
-    start_time = datetime.now()
-    loss_list = []
-    for epoch in range(num_epochs):
-        total_loss = 0
-        for batch in train_loader:
-            batch=batch.to(device)
+    # # define the starting time
+    # start_time = datetime.now()
+    # loss_list = []
+    # for epoch in range(num_epochs):
+    #     total_loss = 0
+    #     for batch in train_loader:
+    #         batch=batch.to(device)
 
-            optimizer.zero_grad()
-            # here the loss is a dict
-            logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = \
-                model3(batch)
+    #         optimizer.zero_grad()
+    #         # here the loss is a dict
+    #         logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = \
+    #             model3(batch)
 
-            total_loss += loss.item()
-            loss.backward()
-            optimizer.step()
+    #         total_loss += loss.item()
+    #         loss.backward()
+    #         optimizer.step()
 
-        avg_loss = total_loss / len(train_loader)
-        loss_list.append(avg_loss)
+    #     avg_loss = total_loss / len(train_loader)
+    #     loss_list.append(avg_loss)
 
-        print(f"For {model_name} Model: Epoch {epoch+1}, Loss: {avg_loss}")
+    #     print(f"For {model_name} Model: Epoch {epoch+1}, Loss: {avg_loss}")
 
-    plot_loss_curve(loss_list,f"{model_name}")
+    # plot_loss_curve(loss_list,f"{model_name}")
 
-    # After training
-    print(f"[{model_name}] Peak GPU memory: {torch.cuda.max_memory_allocated(device)/1024**2:.2f} MB")
-    print(f"[{model_name}] Peak GPU reserved: {torch.cuda.max_memory_reserved(device)/1024**2:.2f} MB")
-    print(f"[{model_name}] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
+    # # After training
+    # print(f"[{model_name}] Peak GPU memory: {torch.cuda.max_memory_allocated(device)/1024**2:.2f} MB")
+    # print(f"[{model_name}] Peak GPU reserved: {torch.cuda.max_memory_reserved(device)/1024**2:.2f} MB")
+    # print(f"[{model_name}] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
 
-    # rank last conv_weight_dict
-    top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
-    print("top k edges are:", top_k_edges)
-    # rank node by eco system
-    top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
-    print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
-    # rank node globally
-    top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
-    print("top global k edges are:", top_k_global_nodes)
-    # final rank
-    print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco, top_k_global_nodes))
+    # # rank last conv_weight_dict
+    # top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
+    # print("top k edges are:", top_k_edges)
+    # # rank node by eco system
+    # top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
+    # print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
+    # # rank node globally
+    # top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
+    # print("top global k edges are:", top_k_global_nodes)
+    # # final rank
+    # print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco, top_k_global_nodes))
 
-    # edge_score_map = explain.compute_edge_import(attn_weights_pooled,edge_index_map_pool, logits, target_class=1)
-    # print("edge score map is:", edge_score_map)
-    # node_score_map = explain.compute_node_import(edge_score_map)
-    # print("node score map is:", edge_score_map)
+    # # edge_score_map = explain.compute_edge_import(attn_weights_pooled,edge_index_map_pool, logits, target_class=1)
+    # # print("edge score map is:", edge_score_map)
+    # # node_score_map = explain.compute_node_import(edge_score_map)
+    # # print("node score map is:", edge_score_map)
 
-    edge_scores, node_scores = explain.explain_with_gradcam(
-        model=model3,
-        dataloader=train_loader,
-        device=device,
-        target_class=1,
-        max_batches=5  # to limit time/memory
-        )
+    # edge_scores, node_scores = explain.explain_with_gradcam(
+    #     model=model3,
+    #     dataloader=train_loader,
+    #     device=device,
+    #     target_class=1,
+    #     max_batches=5  # to limit time/memory
+    #     )
 
-    print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
-    print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
+    # print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
+    # print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
 
-    # --- Evaluation -----
-    model3.eval()
-    all_logits = []
-    all_labels = []
+    # # --- Evaluation -----
+    # model3.eval()
+    # all_logits = []
+    # all_labels = []
 
-    with torch.no_grad():
-        for batch in test_loader:
-            batch = batch.to(next(model3.parameters()).device)
-            logits, _, _, _ ,_ = model3(batch)
-            all_logits.append(logits)
-            all_labels.append(batch['label'])
+    # with torch.no_grad():
+    #     for batch in test_loader:
+    #         batch = batch.to(next(model3.parameters()).device)
+    #         logits, _, _, _ ,_ = model3(batch)
+    #         all_logits.append(logits)
+    #         all_labels.append(batch['label'])
     
-    # Concatenate
-    all_logits = torch.cat(all_logits)
-    all_labels = torch.cat(all_labels)
+    # # Concatenate
+    # all_logits = torch.cat(all_logits)
+    # all_labels = torch.cat(all_labels)
 
-    # Compute metrics
-    metrics = model3.evaluate(all_logits, all_labels)
+    # # Compute metrics
+    # metrics = model3.evaluate(all_logits, all_labels)
 
-    print(f"Evaluation Metrics for {model_name} model: ", metrics)
+    # print(f"Evaluation Metrics for {model_name} model: ", metrics)
 
-    model3.plot_metrics(
-        all_labels,
-        torch.sigmoid(all_logits).cpu().numpy(),
-        metrics)
+    # model3.plot_metrics(
+    #     all_labels,
+    #     torch.sigmoid(all_logits).cpu().numpy(),
+    #     metrics)
 
-    time_spent = datetime.now() - start_time
-    hours, remainder = divmod(time_spent.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    print(f"Time spent for {model_name} (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
+    # time_spent = datetime.now() - start_time
+    # hours, remainder = divmod(time_spent.total_seconds(), 3600)
+    # minutes, seconds = divmod(remainder, 60)
+    # print(f"Time spent for {model_name} (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
-    # save the model after training
-    torch.save(model3.state_dict(), "diff_pnheterogat_model.pth")
-
-
-    
-
-    
+    # # save the model after training
+    # torch.save(model3.state_dict(), "diff_pnheterogat_model.pth")
