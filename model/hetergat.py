@@ -13,12 +13,23 @@ from utils.pregraph import *
 from collections import defaultdict
 from torch.nn import LazyLinear, LayerNorm
 import pandas as pd
+from accelerate import Accelerator
+from accelerate.utils import DistributedDataParallelKwargs
+
+accelerator = Accelerator(device_placement=True)
+
+# important to track unused parameters to avoid errors
+if torch.cuda.device_count() > 1:
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
+else:
+    accelerator = Accelerator()
+
+device = accelerator.device
 
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "Hostnames", "IP", "Command", "Port"]
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
 class HeterGAT(torch.nn.Module):
     def __init__(self, hidden_channels, num_heads, edge_attr_dim, processed_dir):
