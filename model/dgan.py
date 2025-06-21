@@ -43,7 +43,7 @@ node_types = ["Path", "DNS Host", "Hostnames", "Package_Name", "IP", "Command", 
 
 if __name__ == "__main__":
 
-    data_path = Path.cwd().parent.joinpath("ext", "output", "processed")
+    data_path = Path.cwd().parent.joinpath("ext", "corr", "processed")
     print("Creating iterative dataset")
     # return a batch of 10 subgraphs based on saved format
     dataset = IterSubGraphs(root=data_path, batch_size = 1)
@@ -56,14 +56,14 @@ if __name__ == "__main__":
 
     # load one .pt file at a time
     print("Creating subgraph dataloader")
-    num_epochs = 2
+    num_epochs = 15
 
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
 
     train_loader = DataLoader(
         train_data,
-        batch_size=12,
+        batch_size=8,
         shuffle=True,
         pin_memory=False,
         prefetch_factor=None
@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
     test_loader = DataLoader(
         test_data,
-        batch_size=12,
+        batch_size=8,
         shuffle=True,
         pin_memory=False,
         prefetch_factor=None
@@ -151,11 +151,6 @@ if __name__ == "__main__":
     # final rank
     print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-    # edge_score_map = explain.compute_edge_import(atten_weight_dict_2, edge_index_map_2, logits, target_class=1)
-    # print("edge score map is:", edge_score_map)
-    # node_score_map = explain.compute_node_import(edge_score_map)
-    # print("node score map is:", edge_score_map)
-
     edge_scores, node_scores = explain.explain_with_gradcam(
         model=accelerator.unwrap_model(model2),
         dataloader=train_loader,
@@ -174,7 +169,6 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for batch in test_loader:
-            batch = batch.to(next(model2.parameters()).device)
             logits, _ ,_ , _ = model2(batch)
             all_logits.append(logits)
             all_labels.append(batch['label'])
@@ -203,13 +197,9 @@ if __name__ == "__main__":
 
     print("-----------------------------------------------")
     print("Training DiffHeteroGAT ...")
-    batch = next(iter(train_loader))
     model_name = "DiffHeteroGAT"
     # Initialize model with required parameters
     model1 = DiffHeteroGAT(
-        # default is 400
-        # in_channels= list(batch.num_node_features.values())[0],
-        # in_channels= 256,
         hidden_channels=64, 
         edge_attr_dim=16, 
         num_heads=4, 
@@ -239,7 +229,6 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         total_loss = 0
         for batch in train_loader:
-
             optimizer1.zero_grad()
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
             total_loss += loss.item()
@@ -270,10 +259,6 @@ if __name__ == "__main__":
     # final rank
     print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-    # edge_score_map = explain.compute_edge_import(attn_weights_pooled, edge_index_map_pool, logits, target_class=1)
-    # print("edge score map is:", edge_score_map)
-    # node_score_map = explain.compute_node_import(edge_score_map)
-    # print("node score map is:", edge_score_map)
 
     edge_scores, node_scores = explain.explain_with_gradcam(
         model=accelerator.unwrap_model(model1),
@@ -293,7 +278,6 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for batch in test_loader:
-            batch = batch.to(next(model1.parameters()).device)
             logits, _, _, _ ,_ = model1(batch)
             all_logits.append(logits)
             all_labels.append(batch['label'])
@@ -325,9 +309,6 @@ if __name__ == "__main__":
     model_name = "PNHeteroGAT"
     # Initialize model with required parameters
     model3 = PNHeteroGAT(
-        # default is 400
-        # in_channels= list(batch.num_node_features.values())[0],
-        # in_channels= 256,
         hidden_channels=64, 
         edge_attr_dim=16,
         num_heads=4, 
@@ -337,9 +318,11 @@ if __name__ == "__main__":
     optimizer3 = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
 
     # have to use batch_size larger than 1 for constrative loss computation
-    train_loader = DataLoader(
+    train_loader3 = DataLoader(
         train_data,
-        batch_size=12,
+        batch_size=8,
+        # for small data testing
+        # batch_size=2,
         shuffle=True,
         pin_memory=False,
         prefetch_factor=None,
@@ -347,9 +330,11 @@ if __name__ == "__main__":
         drop_last=True
     )
 
-    test_loader = DataLoader(
+    test_loader3 = DataLoader(
         test_data,
-        batch_size=12,
+        batch_size=8,
+        # for small data testing
+        # batch_size=2,
         shuffle=True,
         pin_memory=False,
         prefetch_factor=None,
@@ -361,24 +346,23 @@ if __name__ == "__main__":
     dummy_batch = next(iter(train_loader))
 
     # Step 2: move model to right device
-    model3 = model2.to(device)
+    model3 = model3.to(device)
 
     # Step 3: forward to initialize Lazy module
     with torch.no_grad():
         model3.eval()
         _ = model3(dummy_batch.to(device))
 
-    model3, optimizer3, train_loader, test_loader = accelerator.prepare(
-                model3, optimizer3, train_loader, test_loader
+    model3, optimizer3, train_loader3, test_loader3 = accelerator.prepare(
+                model3, optimizer3, train_loader3, test_loader3
                     )
-
+    
     # define the starting time
     start_time = datetime.now()
     loss_list = []
     for epoch in range(num_epochs):
         total_loss = 0
-        for batch in train_loader:
-
+        for batch in train_loader3:
             optimizer3.zero_grad()
             # here the loss is a dict
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = \
@@ -412,11 +396,6 @@ if __name__ == "__main__":
     # final rank
     print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco, top_k_global_nodes))
 
-    # edge_score_map = explain.compute_edge_import(attn_weights_pooled,edge_index_map_pool, logits, target_class=1)
-    # print("edge score map is:", edge_score_map)
-    # node_score_map = explain.compute_node_import(edge_score_map)
-    # print("node score map is:", edge_score_map)
-
     edge_scores, node_scores = explain.explain_with_gradcam(
         model=accelerator.unwrap_model(model3),
         dataloader=train_loader,
@@ -434,8 +413,7 @@ if __name__ == "__main__":
     all_labels = []
 
     with torch.no_grad():
-        for batch in test_loader:
-            batch = batch.to(next(model3.parameters()).device)
+        for batch in test_loader3:
             logits, _, _, _ ,_ = model3(batch)
             all_logits.append(logits)
             all_labels.append(batch['label'])

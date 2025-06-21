@@ -130,7 +130,7 @@ CUDA_VISIBLE_DEVICES=2 python3 mgan.py
 
 - Multiple GPUs Training:
 ```
-accelerate launch mgan.py
+accelerate launch dgan.py
 ```
 
 ## Experiment Note
