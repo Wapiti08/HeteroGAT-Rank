@@ -25,6 +25,8 @@ import psutil
 import os
 from accelerate import Accelerator
 from accelerate.utils import DistributedDataParallelKwargs
+from torch.utils.data import DistributedSampler
+
 
 accelerator = Accelerator(device_placement=True)
 
@@ -61,20 +63,38 @@ if __name__ == "__main__":
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
 
+    train_sampler = DistributedSampler(
+        train_data, 
+        num_replicas=accelerator.state.num_processes, 
+        rank=accelerator.state.process_index
+        )
+    
+    test_sampler = DistributedSampler(
+        test_data, 
+        num_replicas=accelerator.state.num_processes,
+        rank=accelerator.state.process_index
+        )
+
     train_loader = DataLoader(
         train_data,
         batch_size=8,
-        shuffle=True,
+        # batch_size=2,
+        sampler = train_sampler,
         pin_memory=False,
-        prefetch_factor=None
+        prefetch_factor=None,
+        collate_fn=collate_hetero_data,
+        drop_last=True
     )
 
     test_loader = DataLoader(
         test_data,
         batch_size=8,
-        shuffle=True,
+        # batch_size=2,
+        sampler = test_sampler,
         pin_memory=False,
-        prefetch_factor=None
+        prefetch_factor=None,
+        collate_fn=collate_hetero_data,
+        drop_last=True
     )
     
     print("-----------------------------------------------")
@@ -115,7 +135,7 @@ if __name__ == "__main__":
         total_loss = 0
 
         for batch in train_loader:
-            batch = batch.to(next(model2.parameters()).device)  # Move batch to the same device as model
+            batch = batch.to(device)  # Move batch to the same device as model
             optimizer2.zero_grad()
             # forward pass
             logits, atten_weight_dict_2, edge_atten_map_2, edge_index_map_2 = model2.forward(batch)
@@ -169,6 +189,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for batch in test_loader:
+            batch = batch.to(device)
             logits, _ ,_ , _ = model2(batch)
             all_logits.append(logits)
             all_labels.append(batch['label'])
@@ -229,6 +250,7 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         total_loss = 0
         for batch in train_loader:
+            batch = batch.to(device)
             optimizer1.zero_grad()
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
             total_loss += loss.item()
@@ -278,6 +300,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for batch in test_loader:
+            batch = batch.to(device)
             logits, _, _, _ ,_ = model1(batch)
             all_logits.append(logits)
             all_labels.append(batch['label'])
@@ -318,29 +341,29 @@ if __name__ == "__main__":
     optimizer3 = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
 
     # have to use batch_size larger than 1 for constrative loss computation
-    train_loader3 = DataLoader(
-        train_data,
-        batch_size=8,
-        # for small data testing
-        # batch_size=2,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=None,
-        collate_fn=collate_hetero_data,
-        drop_last=True
-    )
+    # train_loader3 = DataLoader(
+    #     train_data,
+    #     batch_size=8,
+    #     # for small data testing
+    #     # batch_size=2,
+    #     shuffle=True,
+    #     pin_memory=False,
+    #     prefetch_factor=None,
+    #     collate_fn=collate_hetero_data,
+    #     drop_last=True
+    # )
 
-    test_loader3 = DataLoader(
-        test_data,
-        batch_size=8,
-        # for small data testing
-        # batch_size=2,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=None,
-        collate_fn=collate_hetero_data,
-        drop_last=True
-    )
+    # test_loader3 = DataLoader(
+    #     test_data,
+    #     batch_size=8,
+    #     # for small data testing
+    #     # batch_size=2,
+    #     shuffle=True,
+    #     pin_memory=False,
+    #     prefetch_factor=None,
+    #     collate_fn=collate_hetero_data,
+    #     drop_last=True
+    # )
 
     # Step 1: create dummy batch
     dummy_batch = next(iter(train_loader))
@@ -353,8 +376,8 @@ if __name__ == "__main__":
         model3.eval()
         _ = model3(dummy_batch.to(device))
 
-    model3, optimizer3, train_loader3, test_loader3 = accelerator.prepare(
-                model3, optimizer3, train_loader3, test_loader3
+    model3, optimizer3 = accelerator.prepare(
+                model3, optimizer3
                     )
     
     # define the starting time
@@ -362,7 +385,8 @@ if __name__ == "__main__":
     loss_list = []
     for epoch in range(num_epochs):
         total_loss = 0
-        for batch in train_loader3:
+        for batch in train_loader:
+            batch = batch.to(device)
             optimizer3.zero_grad()
             # here the loss is a dict
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = \
@@ -413,7 +437,8 @@ if __name__ == "__main__":
     all_labels = []
 
     with torch.no_grad():
-        for batch in test_loader3:
+        for batch in test_loader:
+            batch = batch.to(device)
             logits, _, _, _ ,_ = model3(batch)
             all_logits.append(logits)
             all_labels.append(batch['label'])
