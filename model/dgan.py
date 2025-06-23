@@ -8,10 +8,11 @@ import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from ext.iter_loader import IterSubGraphs, collate_hetero_data
+from ext.iter_loader import IterSubGraphs, collate_hetero_data, process_data
 from utils.evals import plot_loss_curve
 from ana import diffanalyzer, explain
-from torch_geometric.loader import DataLoader
+# from torch_geometric.loader import DataLoader
+from torch.utils.data import DataLoader
 from datetime import datetime
 import os
 from sklearn.model_selection import train_test_split
@@ -26,6 +27,7 @@ import os
 from accelerate import Accelerator
 from accelerate.utils import DistributedDataParallelKwargs
 from torch.utils.data import DistributedSampler
+import torch_geometric
 
 
 accelerator = Accelerator(device_placement=True)
@@ -56,12 +58,16 @@ if __name__ == "__main__":
     with node_json_file.open("r") as fr:
         node_json = [json.loads(line) for line in fr]
 
-    # load one .pt file at a time
     print("Creating subgraph dataloader")
     num_epochs = 15
 
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
+
+    # preprocess data --- sparse to dense
+    print("Converting sparse to dense")
+    train_data = process_data(train_data, device)
+    test_data = process_data(test_data, device)  
 
     train_sampler = DistributedSampler(
         train_data, 
@@ -78,22 +84,22 @@ if __name__ == "__main__":
     train_loader = DataLoader(
         train_data,
         batch_size=8,
-        # batch_size=2,
         sampler = train_sampler,
         pin_memory=False,
         prefetch_factor=None,
-        collate_fn=collate_hetero_data,
+        # individual subgraph to batch of subgraphs
+        collate_fn=lambda batch: collate_hetero_data(batch,device),
         drop_last=True
     )
 
     test_loader = DataLoader(
         test_data,
         batch_size=8,
-        # batch_size=2,
         sampler = test_sampler,
         pin_memory=False,
         prefetch_factor=None,
-        collate_fn=collate_hetero_data,
+        # individual subgraph to batch of subgraphs
+        collate_fn=lambda batch: collate_hetero_data(batch, device),
         drop_last=True
     )
     
@@ -102,7 +108,6 @@ if __name__ == "__main__":
     model_name = "HeteroGAT"
     model2 = HeterGAT(
         hidden_channels=64,
-        # out_channels=256,
         num_heads=4,
         # based on pre-set dimension
         edge_attr_dim=16,
@@ -133,7 +138,6 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         model2.train()
         total_loss = 0
-
         for batch in train_loader:
             batch = batch.to(device)  # Move batch to the same device as model
             optimizer2.zero_grad()
@@ -339,31 +343,6 @@ if __name__ == "__main__":
     )
 
     optimizer3 = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
-
-    # have to use batch_size larger than 1 for constrative loss computation
-    # train_loader3 = DataLoader(
-    #     train_data,
-    #     batch_size=8,
-    #     # for small data testing
-    #     # batch_size=2,
-    #     shuffle=True,
-    #     pin_memory=False,
-    #     prefetch_factor=None,
-    #     collate_fn=collate_hetero_data,
-    #     drop_last=True
-    # )
-
-    # test_loader3 = DataLoader(
-    #     test_data,
-    #     batch_size=8,
-    #     # for small data testing
-    #     # batch_size=2,
-    #     shuffle=True,
-    #     pin_memory=False,
-    #     prefetch_factor=None,
-    #     collate_fn=collate_hetero_data,
-    #     drop_last=True
-    # )
 
     # Step 1: create dummy batch
     dummy_batch = next(iter(train_loader))

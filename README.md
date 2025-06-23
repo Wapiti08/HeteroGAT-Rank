@@ -140,8 +140,9 @@ sudo apt update
 sudo apt install aria2
 # need cookie to enable right file download
 aria2c -k 1M -x 8 -s 8 \
---header="Cookie: C.20646273_auth_token=d78a9c53c67d13a66eacf0b3a3b36c7716b182907f53df1fb7a2dd2fa304e52a; username-174-93-255-152-30579=\"2|1:0|10:1749218255|29:username-174-93-255-152-30579|192:eyJ1c2VybmFtZSI6ICI1ZTIwZmZhNDY3Njk0ZGM2OWE2ZTUyZmNkMTZiZmY3YyIsICJuYW1lIjogIkFub255bW91cyBDYXJwbyIsICJkaXNwbGF5X25hbWUiOiAiQW5vbnltb3VzIENhcnBvIiwgImluaXRpYWxzIjogIkFDIiwgImNvbG9yIjogbnVsbH0=|a3c2277c844327ceb36ca27bf798682205b1c622c3da302d89b7645c4e6907ee\"; _xsrf=2|fb25189e|4a187458f44f232c65a4544cec970cb2|1749218255" \
-"https://174.93.255.152:30579/files/workspace/DDGRL.zip"
+--header="Cookie: username-mixing-graphics-agenda-librarian-trycloudflare-com=\"2|1:0|10:1750668312|59:username-mixing-graphics-agenda-librarian-trycloudflare-com|200:eyJ1c2VybmFtZSI6ICJlYmQ5YjgwZDk0YTM0ZjIwYWI0NDM0NjE5MTlhODU3YiIsICJuYW1lIjogIkFub255bW91cyBBbWFsdGhlYSIsICJkaXNwbGF5X25hbWUiOiAiQW5vbnltb3VzIEFtYWx0aGVhIiwgImluaXRpYWxzIjogIkFBIiwgImNvbG9yIjogbnVsbH0=|4a393cbf532b62f3e2d481a6f394a6cec07587f1e95ffc80b8cafe11cb304cb3\"; _xsrf=2|854af5bb|5b2a4314559e61e83185255caa3ccea4|1750668312" \
+"https://mixing-graphics-agenda-librarian.trycloudflare.com/files/workspace/DDGRL.zip?_xsrf=2%7C854af5bb%7C5b2a4314559e61e83185255caa3ccea4%7C1750668312"
+
 
 ```
 

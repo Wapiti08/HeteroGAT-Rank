@@ -10,8 +10,6 @@ import time
 from torch_geometric.data import HeteroData
 from torch_geometric.data import Batch
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 class IterSubGraphs(Dataset):
     
     def __init__(self, root, batch_size=1, transform=None):
@@ -92,23 +90,35 @@ class IterSubGraphs(Dataset):
     def __len__(self):
         return len(self.file_list)
 
-
-def to_dense_safe(data):
-    # Loop through all node types and edge types
+def to_dense_safe(data, device):
+    # Loop through all node types
     for key in data.node_types:
-        if hasattr(data[key], 'x') and torch.is_tensor(data[key].x) and data[key].x.is_sparse:
-            data[key].x = data[key].x.to_dense()
+        if hasattr(data[key], 'x') and torch.is_tensor(data[key].x):
+            if data[key].x.is_sparse:
+                data[key].x = data[key].x.to_dense()  # Convert sparse to dense
+
+    # Loop through all edge types
     for edge_type in data.edge_types:
-        if hasattr(data[edge_type], 'edge_index') and torch.is_tensor(data[edge_type].edge_index) and data[edge_type].edge_index.is_sparse:
-            data[edge_type].edge_index = data[edge_type].edge_index.to_dense().long()
-        if hasattr(data[edge_type], 'edge_attr') and torch.is_tensor(data[edge_type].edge_attr) and data[edge_type].edge_attr.is_sparse:
-            data[edge_type].edge_attr = data[edge_type].edge_attr.to_dense()
-    return data
+        if hasattr(data[edge_type], 'edge_index') and torch.is_tensor(data[edge_type].edge_index):
+            if data[edge_type].edge_index.is_sparse:
+                data[edge_type].edge_index = data[edge_type].edge_index.to_dense().long()  # Convert sparse to dense
+        
+        if hasattr(data[edge_type], 'edge_attr') and torch.is_tensor(data[edge_type].edge_attr):
+            if data[edge_type].edge_attr.is_sparse:
+                data[edge_type].edge_attr = data[edge_type].edge_attr.to_dense()  # Convert sparse to dense
+
+    # Return the entire data object moved to the target device after processing
+    return data.to(device)  # Move the entire object to the device after processing
 
 # Custom collate function to handle HeteroData objects
-def collate_hetero_data(batch):
+def process_data(data, device):
+    return [to_dense_safe(d, device) for d in data]
+
+def collate_hetero_data(batch, device):
     """Custom collate function to handle batching of HeteroData objects."""
-    return Batch.from_data_list([to_dense_safe(data) for data in batch])
+    # Apply to_dense_safe before batching
+    batch = Batch.from_data_list(batch)
+    return batch.to(device)
 
 if __name__ == "__main__":
 

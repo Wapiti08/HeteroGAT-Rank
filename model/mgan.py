@@ -46,26 +46,26 @@ if __name__ == "__main__":
 
     # load one .pt file at a time
     print("Creating subgraph dataloader")
-    num_epochs = 12
+    num_epochs = 15
 
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
 
-    train_loader = DataLoader(
-        train_data,
-        batch_size=1,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=None
-    )
+    # train_loader = DataLoader(
+    #     train_data,
+    #     batch_size=1,
+    #     shuffle=True,
+    #     pin_memory=False,
+    #     prefetch_factor=None
+    # )
 
-    test_loader = DataLoader(
-        test_data,
-        batch_size=1,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=None
-    )
+    # test_loader = DataLoader(
+    #     test_data,
+    #     batch_size=1,
+    #     shuffle=True,
+    #     pin_memory=False,
+    #     prefetch_factor=None
+    # )
     
     # print("-----------------------------------------------")
     # print("Training HeteroGAT ...")
@@ -298,6 +298,7 @@ if __name__ == "__main__":
     ).to(device)
 
     optimizer = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
+
     # have to use batch_size larger than 1 for constrative loss computation
     train_loader = DataLoader(
         train_data,
