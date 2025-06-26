@@ -1,6 +1,8 @@
 ray[cgraph]!=2.44.*,>=2.43.0
 scikit-learn==1.6.0
 dask==2023.5.0
+dask[distributed]==2023.5.0
+# compatible for cuda 12.4
 torch==2.6.0
 torch-geometric==2.6.1
 torch-scatter==2.1.2

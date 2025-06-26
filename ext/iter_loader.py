@@ -9,9 +9,21 @@ import numpy as np
 import time
 from torch_geometric.data import HeteroData
 from torch_geometric.data import Batch
+from dask import delayed
+
+def to_sparse_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Convert a dense tensor to a sparse tensor.
+    If it's already sparse, returns it unchanged.
+    """
+    if not isinstance(tensor, torch.Tensor):
+        return tensor
+    if tensor.is_sparse:
+        return tensor
+    # Convert to sparse COO format
+    return tensor.to_sparse()
 
 class IterSubGraphs(Dataset):
-    
     def __init__(self, root, batch_size=1, transform=None):
         self.batch_size = batch_size
         self.data_path = Path(root)
@@ -19,32 +31,42 @@ class IterSubGraphs(Dataset):
         self.transform = transform
         print(f"[Init] Found {len(self.file_list)} files in {self.data_path}")
 
+    def _make_sparse(self, batch: dict) -> dict:
+        """
+        Recursively convert all tensor components in the batch to sparse tensors.
+        """
+        for edge_type in batch.edge_types:
+            if hasattr(batch[edge_type], 'edge_index'):
+                batch[edge_type].edge_index = to_sparse_tensor(batch[edge_type].edge_index)
+            if hasattr(batch[edge_type], 'edge_attr'):
+                batch[edge_type].edge_attr = to_sparse_tensor(batch[edge_type].edge_attr)
+
+        return batch
+
     def __getitem__(self, index):
-        file_path = self.file_list[index]  # Retrieve the file path based on the index
-        
+        file_path = self.file_list[index]
         print(f"[GetItem] Loading {file_path.name}")
         try:
-            # set up weights_only to avoid loading error
             batch = torch.load(file_path, map_location="cpu", weights_only=False)
-
             if batch is None:
                 print(f"[GetItem] subgraph in {file_path.name} is None.")
                 return None
             print(f"[GetItem] Loaded {file_path.name}")
-            
         except Exception as e:
             print(f"[GetItem] Failed to load {file_path.name}: {e}")
             return None
-        
-        # Apply transformations if any
+
+        # Convert all tensor components to sparse
+        batch = self._make_sparse(batch)
+        print("[GetItem] Converted to sparse")
+
         if self.transform:
             batch = self.transform(batch)
             print("[GetItem] Transform applied")
-        
+
         return batch
 
     def __iter__(self):
-
         worker_info = get_worker_info()
         if worker_info is None:
             file_list = self.file_list
@@ -61,26 +83,25 @@ class IterSubGraphs(Dataset):
             print(f"[Iter] Loading {file_path.name}")
             try:
                 batch = torch.load(file_path, map_location="cpu")
-
                 if batch is None:
                     print(f"[Iter] subgraph in {file_path.name} is None.")
                     continue
                 print(f"[Iter] Loaded {file_path.name}")
-                print(f"[Iter] Loaded {file_path.name}")
-
             except Exception as e:
                 print(f"[Iter] Failed to load {file_path.name}: {e}")
                 continue
 
             # calculate and set num_nodes
-            for node_type in batch.keys():  # Now iterating over node types like 'Package_Name', 'Path', etc.
-                # Skip edge-related keys like 'edge_index' and 'edge_attr'
+            for node_type, data in batch.items():
                 if node_type in ['edge_index', 'edge_attr']:
                     continue
-                if hasattr(batch[node_type], 'x'):
-                    node_data = batch[node_type].x 
-                    batch[node_type].num_nodes = node_data.size(0)  # Assuming node_data has the shape [num_nodes, features]
-            
+                if hasattr(data, 'x'):
+                    data.num_nodes = data.x.size(0)
+
+            # Convert to sparse
+            batch = self._make_sparse(batch)
+            print("[Iter] Converted to sparse")
+
             if self.transform:
                 batch = self.transform(batch)
                 print("[Iter] Transform applied")
@@ -90,29 +111,6 @@ class IterSubGraphs(Dataset):
     def __len__(self):
         return len(self.file_list)
 
-def to_dense_safe(data, device):
-    # Loop through all node types
-    for key in data.node_types:
-        if hasattr(data[key], 'x') and torch.is_tensor(data[key].x):
-            if data[key].x.is_sparse:
-                data[key].x = data[key].x.to_dense()  # Convert sparse to dense
-
-    # Loop through all edge types
-    for edge_type in data.edge_types:
-        if hasattr(data[edge_type], 'edge_index') and torch.is_tensor(data[edge_type].edge_index):
-            if data[edge_type].edge_index.is_sparse:
-                data[edge_type].edge_index = data[edge_type].edge_index.to_dense().long()  # Convert sparse to dense
-        
-        if hasattr(data[edge_type], 'edge_attr') and torch.is_tensor(data[edge_type].edge_attr):
-            if data[edge_type].edge_attr.is_sparse:
-                data[edge_type].edge_attr = data[edge_type].edge_attr.to_dense()  # Convert sparse to dense
-
-    # Return the entire data object moved to the target device after processing
-    return data.to(device)  # Move the entire object to the device after processing
-
-# Custom collate function to handle HeteroData objects
-def process_data(data, device):
-    return [to_dense_safe(d, device) for d in data]
 
 def collate_hetero_data(batch, device):
     """Custom collate function to handle batching of HeteroData objects."""

@@ -5,6 +5,8 @@
  '''
 
 import sys
+from dask.distributed import Client
+import dask
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
@@ -29,16 +31,15 @@ from accelerate.utils import DistributedDataParallelKwargs
 from torch.utils.data import DistributedSampler
 import torch_geometric
 
+# 1) Build kwargs handlers if needed
+ddp_kwargs = (DistributedDataParallelKwargs(find_unused_parameters=True)
+              if torch.cuda.device_count() > 1 else None)
 
-accelerator = Accelerator(device_placement=True)
-
-# important to track unused parameters to avoid errors
-if torch.cuda.device_count() > 1:
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
-else:
-    accelerator = Accelerator()
-
+# 2) Single Accelerator instantiation
+accelerator = Accelerator(
+    device_placement=True,
+    kwargs_handlers=[ddp_kwargs] if ddp_kwargs else []
+)
 device = accelerator.device
 
 torch.cuda.reset_peak_memory_stats(device)
@@ -47,10 +48,14 @@ node_types = ["Path", "DNS Host", "Hostnames", "Package_Name", "IP", "Command", 
 
 if __name__ == "__main__":
 
+    # Start a Dask client for parallel processing
+    # client = Client()
+
     data_path = Path.cwd().parent.joinpath("ext", "corr", "processed")
     print("Creating iterative dataset")
     # return a batch of 10 subgraphs based on saved format
     dataset = IterSubGraphs(root=data_path, batch_size = 1)
+    print(f"Dataset created with {len(dataset)} subgraphs")
 
     node_json_file = Path.cwd().parent.joinpath("ext", "output", "nodes.json")
 
@@ -64,39 +69,70 @@ if __name__ == "__main__":
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
 
-    # preprocess data --- sparse to dense
-    print("Converting sparse to dense")
-    train_data = process_data(train_data, device)
-    test_data = process_data(test_data, device)  
+    # Function to check batch before passing to DataLoader
+    # def check_batch(batch):
+    #     print(f"Checking batch with {len(batch)} items.")
+        
+    #     for i, data in enumerate(batch):
+    #         print(f"  Batch {i}: Checking tensor types and sparsity")
+            
+    #         # Check node types (node features and x)
+    #         for node_type, node_data in data.items():
+    #             print(f"    node_type: {node_type}")
+    #             if hasattr(node_data, 'x'):
+    #                 node_features = node_data.x
+    #                 print(f"      node features ('x'): type={type(node_features)}, sparse={node_features.is_sparse if hasattr(node_features, 'is_sparse') else False}, device={node_features.device}")
+    #             else:
+    #                 print(f"      Missing node features ('x') for node_type {node_type}")
+            
+    #         # Check edge types (edge_index and edge_attr)
+    #         # Iterate through all edge types, assuming edge_type keys are in the form of 'source_node_type-target_node_type'
+    #         for edge_type in data.edge_types:
+    #             print(f"    Checking edge type: {edge_type}")
+    #             edge_index = data[edge_type].edge_index
+    #             print(f"      {edge_type}: type={type(edge_index)}, sparse={edge_index.is_sparse if hasattr(edge_index, 'is_sparse') else False}, device={edge_index.device}")
+                
+    #             # Check edge_attr if available for the edge type
+    #             edge_attr = data[edge_type].edge_attr
+    #             print(f"    the edge attr of  {edge_type}: type={type(edge_attr)}, sparse={edge_attr.is_sparse if hasattr(edge_attr, 'is_sparse') else False}, device={edge_attr.device}")
+            
 
-    train_sampler = DistributedSampler(
-        train_data, 
-        num_replicas=accelerator.state.num_processes, 
-        rank=accelerator.state.process_index
-        )
-    
-    test_sampler = DistributedSampler(
-        test_data, 
-        num_replicas=accelerator.state.num_processes,
-        rank=accelerator.state.process_index
-        )
+    # # Check first few items in the train_data before DataLoader
+    # print("Checking the first few items in the train dataset before passing to DataLoader")
+    # for i, data in enumerate(train_data):
+    #     check_batch([data])  # We pass a list to simulate the batch (just for inspection)
+
+    train_data, test_data = accelerator.prepare(train_data, test_data)
+
+    # # Check first few items in the train_data after accelerate prepare before DataLoader
+    # print("Checking the first few items in the train dataset after accelerate prepare before DataLoader")
+    # for i, data in enumerate(train_data):
+    #     check_batch([data]) 
 
     train_loader = DataLoader(
         train_data,
-        batch_size=8,
-        sampler = train_sampler,
+        batch_size=24,
+        # sampler = train_sampler,
+        # when use dense matrix
+        # pin_memory=True,
+        # when not use sampler
+        shuffle=True,
         pin_memory=False,
         prefetch_factor=None,
         # individual subgraph to batch of subgraphs
-        collate_fn=lambda batch: collate_hetero_data(batch,device),
+        collate_fn=lambda batch: collate_hetero_data(batch, device),
         drop_last=True
     )
 
     test_loader = DataLoader(
         test_data,
-        batch_size=8,
-        sampler = test_sampler,
+        batch_size=24,
+        # sampler = test_sampler,
+        # when use dense matrix
+        # pin_memory=True,
         pin_memory=False,
+        # when not use sampler
+        shuffle=True,
         prefetch_factor=None,
         # individual subgraph to batch of subgraphs
         collate_fn=lambda batch: collate_hetero_data(batch, device),
@@ -139,7 +175,6 @@ if __name__ == "__main__":
         model2.train()
         total_loss = 0
         for batch in train_loader:
-            batch = batch.to(device)  # Move batch to the same device as model
             optimizer2.zero_grad()
             # forward pass
             logits, atten_weight_dict_2, edge_atten_map_2, edge_index_map_2 = model2.forward(batch)
@@ -254,7 +289,6 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         total_loss = 0
         for batch in train_loader:
-            batch = batch.to(device)
             optimizer1.zero_grad()
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
             total_loss += loss.item()
@@ -365,7 +399,6 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         total_loss = 0
         for batch in train_loader:
-            batch = batch.to(device)
             optimizer3.zero_grad()
             # here the loss is a dict
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = \
