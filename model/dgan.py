@@ -10,7 +10,7 @@ import dask
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
-from ext.iter_loader import IterSubGraphs, collate_hetero_data, process_data
+from ext.iter_loader import IterSubGraphs, collate_hetero_data
 from utils.evals import plot_loss_curve
 from ana import diffanalyzer, explain
 # from torch_geometric.loader import DataLoader
@@ -69,18 +69,16 @@ if __name__ == "__main__":
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
 
-    # Function to check batch before passing to DataLoader
+    # # Function to check batch before passing to DataLoader
     # def check_batch(batch):
     #     print(f"Checking batch with {len(batch)} items.")
-        
     #     for i, data in enumerate(batch):
     #         print(f"  Batch {i}: Checking tensor types and sparsity")
-            
     #         # Check node types (node features and x)
-    #         for node_type, node_data in data.items():
+    #         for node_type in data.node_types:
     #             print(f"    node_type: {node_type}")
-    #             if hasattr(node_data, 'x'):
-    #                 node_features = node_data.x
+    #             if hasattr(data[node_type], 'x'):
+    #                 node_features = data[node_type].x
     #                 print(f"      node features ('x'): type={type(node_features)}, sparse={node_features.is_sparse if hasattr(node_features, 'is_sparse') else False}, device={node_features.device}")
     #             else:
     #                 print(f"      Missing node features ('x') for node_type {node_type}")

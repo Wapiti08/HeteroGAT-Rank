@@ -35,6 +35,12 @@ class IterSubGraphs(Dataset):
         """
         Recursively convert all tensor components in the batch to sparse tensors.
         """
+        # convert node features
+        for node_type in batch.node_types:
+            if hasattr(batch[node_type], 'x'):
+                batch[node_type].x = to_sparse_tensor(batch[node_type].x)
+
+        # convert edge features
         for edge_type in batch.edge_types:
             if hasattr(batch[edge_type], 'edge_index'):
                 batch[edge_type].edge_index = to_sparse_tensor(batch[edge_type].edge_index)
