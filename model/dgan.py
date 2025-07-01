@@ -240,11 +240,10 @@ if __name__ == "__main__":
     # Step 1: create dummy batch
     dummy_batch = next(iter(train_loader))
 
-
     # Step 3: forward to initialize Lazy module
     with torch.no_grad():
         model1.eval()
-        _ = model1(dummy_batch.to(device))
+        _ = model1(dummy_batch)
 
     # define the starting time
     start_time = datetime.now()
