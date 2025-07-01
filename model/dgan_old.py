@@ -9,7 +9,6 @@ from dask.distributed import Client
 import dask
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
-from torch.cuda.amp import autocast
 import torch
 from ext.iter_loader import IterSubGraphs, collate_hetero_data
 from utils.evals import plot_loss_curve
@@ -52,7 +51,7 @@ if __name__ == "__main__":
     # Start a Dask client for parallel processing
     # client = Client()
 
-    data_path = Path.cwd().parent.joinpath("ext", "corr", "processed")
+    data_path = Path.cwd().parent.joinpath("ext", "output", "processed")
     print("Creating iterative dataset")
     # return a batch of 10 subgraphs based on saved format
     dataset = IterSubGraphs(root=data_path, batch_size = 1)
@@ -65,7 +64,7 @@ if __name__ == "__main__":
         node_json = [json.loads(line) for line in fr]
 
     print("Creating subgraph dataloader")
-    num_epochs = 15
+    num_epochs = 1
 
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
@@ -74,7 +73,7 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(
         train_data,
-        batch_size=24,
+        batch_size=12,
         # sampler = train_sampler,
         # when use dense matrix
         # pin_memory=True,
@@ -89,7 +88,7 @@ if __name__ == "__main__":
 
     test_loader = DataLoader(
         test_data,
-        batch_size=24,
+        batch_size=12,
         # sampler = test_sampler,
         # when use dense matrix
         # pin_memory=True,
@@ -134,9 +133,7 @@ if __name__ == "__main__":
     # # define the starting time
     # start_time = datetime.now()
     # loss_list = []
-    # explain_every = 5  # Toggle explanation every N epochs
     # for epoch in range(num_epochs):
-    #     model.enable_debug = (epoch % explain_every == 0)
     #     model2.train()
     #     total_loss = 0
     #     for batch in train_loader:
@@ -233,26 +230,25 @@ if __name__ == "__main__":
 
     optimizer1 = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
-    model1, optimizer1 = accelerator.prepare(
-                model1, optimizer1
-                    )
-
     # Step 1: create dummy batch
     dummy_batch = next(iter(train_loader))
 
+    # Step 2: move model to right device
+    model1 = model1.to(device)
 
     # Step 3: forward to initialize Lazy module
     with torch.no_grad():
         model1.eval()
         _ = model1(dummy_batch.to(device))
 
+    model1, optimizer1 = accelerator.prepare(
+                model1, optimizer1
+                    )
+
     # define the starting time
     start_time = datetime.now()
     loss_list = []
-    explain_every = 5  # Toggle explanation every N epochs
     for epoch in range(num_epochs):
-        print(f"Training on epoch {epoch}")
-        model1.enable_debug = (epoch % explain_every == 0)
         total_loss = 0
         for batch in train_loader:
             optimizer1.zero_grad()
@@ -344,26 +340,26 @@ if __name__ == "__main__":
     )
 
     optimizer3 = torch.optim.Adam(model3.parameters(), lr=0.001, weight_decay=1e-4)
-    
-    model3, optimizer3 = accelerator.prepare(
-                model3, optimizer3
-                    )
 
     # Step 1: create dummy batch
     dummy_batch = next(iter(train_loader))
 
+    # Step 2: move model to right device
+    model3 = model3.to(device)
+
     # Step 3: forward to initialize Lazy module
     with torch.no_grad():
         model3.eval()
-        _ = model3(dummy_batch)
+        _ = model3(dummy_batch.to(device))
+
+    model3, optimizer3 = accelerator.prepare(
+                model3, optimizer3
+                    )
     
     # define the starting time
     start_time = datetime.now()
     loss_list = []
-    explain_every = 5  # Toggle explanation every N epochs
     for epoch in range(num_epochs):
-        print(f"Training on epoch {epoch}")
-        model3.enable_debug = (epoch % explain_every == 0)
         total_loss = 0
         for batch in train_loader:
             optimizer3.zero_grad()

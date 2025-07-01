@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 import torch
 from utils import sparsepad
-from torch_geometric.nn import HeteroConv, GATConv,global_mean_pool
+from torch_geometric.nn import HeteroConv, GATConv, global_mean_pool
 from torch import nn
 import torch.nn.functional as F
 import os

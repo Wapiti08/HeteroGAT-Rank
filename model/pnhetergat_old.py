@@ -1,3 +1,8 @@
+'''
+ # @ Create Time: 2025-05-11 14:58:00
+ # @ Modified time: 2025-05-11 14:58:09
+ # @ Description: implement version with constractive loss
+ '''
 import sys
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
@@ -29,8 +34,7 @@ device = accelerator.device
 # predefined node types
 node_types = ["Path", "DNS Host", "Package_Name", "Hostnames", "IP", "Command", "Port"]
 
-
-class DiffHeteroGAT(torch.nn.Module):
+class PNHeteroGAT(torch.nn.Module):
     def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir, enable_debug=False):
         '''
         args:
@@ -41,7 +45,7 @@ class DiffHeteroGAT(torch.nn.Module):
             num_edges: the number of edges in a batch
             num_nodes: the number of nodes in a batch
         '''
-        super(DiffHeteroGAT, self).__init__()
+        super(PNHeteroGAT, self).__init__()
 
         self.edge_types = [
             ('Package_Name', 'Action', 'Path'),
@@ -69,9 +73,10 @@ class DiffHeteroGAT(torch.nn.Module):
         self.classifier = LazyLinear(1)
 
         self.enable_debug = enable_debug
+
+        # Always initialize, even if empty, to avoid attribute errors
         self.latest_attn_weights = {}
         self.latest_edge_index_map = {}
-        self.reverse_node_id_map = {}
 
         if self.enable_debug:
             node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
@@ -114,13 +119,13 @@ class DiffHeteroGAT(torch.nn.Module):
         edge_atten_map = {} if self.enable_debug else None
         edge_index_map = {} if self.enable_debug else None
 
+
         for edge_type, conv in conv_module.convs.items():
             src_type, _, tgt_type = edge_type
 
             if src_type not in x_dict or tgt_type not in x_dict:
-                if self.enable_debug:
-                    print(f"Warning: {src_type if src_type not in x_dict else tgt_type} not in x_dict.")
-                    continue
+                print(f"Warning: {src_type if src_type not in x_dict else tgt_type} not in x_dict.")
+                continue
 
             x_src, x_tgt = x_dict[src_type], x_dict[tgt_type]
             edge_index = local_edge_index_dict[edge_type]
@@ -129,7 +134,7 @@ class DiffHeteroGAT(torch.nn.Module):
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
 
             # Detach alpha from autograd + move to CPU
-            if self.enable_debug and self.reverse_node_id_map:
+            if self.enable_debug:
                 alpha = alpha.detach().cpu()
                 self.latest_attn_weights[edge_type] = alpha
                 self.latest_edge_index_map[edge_type] = edge_index.T.tolist()
@@ -140,13 +145,10 @@ class DiffHeteroGAT(torch.nn.Module):
                     tgt_node = get_ori_node_value(edge_index[1, i].item(), self.reverse_node_id_map)
                     edge_atten_map[(src_node, tgt_node)] = alpha[i, 0].item()
                     edge_index_map.setdefault(edge_type, []).append((src_node, tgt_node))
+            
 
             attn_weights[edge_type] = alpha
-
-            if tgt_type in out_dict:
-                out_dict[tgt_type] = torch.add(out_dict[tgt_type], out)
-            else:
-                out_dict[tgt_type] = out
+            out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
         
         # After the first pass, merge the updated features with the original ones for all node types
         for node_type, x in x_dict.items():
@@ -170,42 +172,50 @@ class DiffHeteroGAT(torch.nn.Module):
             batch: HeteroData type with node_types -> x and edge_types -> edge_index and edge_attr
 
         '''
+        assert batch.label.size(0) > 1, "Only one graph in batch — check your DataLoader or dataset batching!"
+
         x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
 
-        # --- First conv ---
-        local_edge_index_dict = self.to_local_edge_indices(x_dict, edge_index_dict)
+        # convert global indices to local indices
+        local_edge_index_dict_1 = self.to_local_edge_indices(x_dict, edge_index_dict)
+        # GAT layer 1
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 =\
-            self.cal_attn_weight(self.conv1, x_dict, local_edge_index_dict)
+            self.cal_attn_weight(self.conv1, x_dict, local_edge_index_dict_1)
+
         # apply layernorm, exclude Package_Name
         x_dict = self._process_x_dict(x_dict_1, self.ln1)
 
-        # --- Second conv ---
+        # GAT layer 2
+        # Second conv still on original graph (no pooling)
+        local_edge_index_dict_2 = self.to_local_edge_indices(x_dict, edge_index_dict)
         x_dict_2, attn_weights_2, edge_atten_map_2, edge_index_map_2 = \
-            self.cal_attn_weight(self.conv2, x_dict, local_edge_index_dict)
+            self.cal_attn_weight(self.conv2, x_dict, local_edge_index_dict_2)
         x_dict = self._process_x_dict(x_dict_2, self.ln2)
 
         # ---- Final node pooling (excluding Package_Name)
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
         batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
-
-        node_pool = self.node_pool(x_dict_target, batch_dict_target).to(device)
-        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict).to(device)
-
+        
+        node_pool = self.node_pool(x_dict_target, batch_dict_target)
+        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict)
+        
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
         logits = self.classifier(graph_embed).squeeze(-1)
 
-        # align with the shape
-        label = batch.label if batch.label.dim() > 0 else batch.label.unsqueeze(0)
-        logits = logits if logits.dim() > 0 else logits.unsqueeze(0)
-
-        # compute composite loss
-        loss = self.loss_fn(
+        # Make sure logits and label have the same shape
+        label = batch.label.view(-1)  # shape: [B]
+        
+        # compute composite loss --- loss is a dict type
+        loss_dict = self.loss_fn(
             cls_loss=F.binary_cross_entropy_with_logits(logits, label.float()),
-            attn_weights=attn_weights_2
+            attn_weights=attn_weights_2,
+            graph_embeds=graph_embed,
+            labels = batch.label.float(),
+            return_details=True  
         )
 
-        return logits, loss, attn_weights_2, edge_atten_map_2, edge_index_map_2
+        return logits, loss_dict['total'], attn_weights_2, edge_atten_map_2, edge_index_map_2
     
     
     def evaluate(self, logits, batch, threshold=0.5):
@@ -218,11 +228,12 @@ class DiffHeteroGAT(torch.nn.Module):
         
         '''
         # define the default save name
-        roc_save_path = "roc_curve_dheterogat.png"
-        metric_save_path = "metrics_bar_dheterogat.png"
+        roc_save_path = "roc_curve_PNHeteroGAT.png"
+        metric_save_path = "metrics_bar_PNHeteroGAT.png"
 
         evals.plot_roc(y_true, y_prob, roc_save_path)
         evals.plot_metrics_bar(metrics, metric_save_path)
+
 
     def agg_edge_features(self, edge_attr_dict):
         ''' aggregate edge attribute globally

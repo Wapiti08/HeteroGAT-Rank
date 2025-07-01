@@ -31,7 +31,7 @@ node_types = ["Path", "DNS Host", "Package_Name", "Hostnames", "IP", "Command", 
 
 
 class DiffHeteroGAT(torch.nn.Module):
-    def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir, enable_debug=False):
+    def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir):
         '''
         args:
             in_channels: the dimensionality of the input node features
@@ -52,8 +52,38 @@ class DiffHeteroGAT(torch.nn.Module):
             ('Package_Name', 'socket_host', 'Hostnames'),
         ]
 
-        self.conv1 = self._build_hetero_gat(num_heads)
-        self.conv2 = self._build_hetero_gat(num_heads)
+        # GAT layers
+        self.conv1 = HeteroConv(
+            {et: 
+            #  GATv2Conv((-1, -1), hidden_channels, heads=num_heads,
+            #              add_self_loops=False)
+             GATv2Conv(
+                in_channels=(-1, -1),  
+                out_channels=64,  
+                heads=num_heads,  
+                concat=True,  
+                negative_slope=0.2,
+                add_self_loops=False
+            )
+             for et in self.edge_types},
+              # aggregation method for multi-head attention
+            aggr='mean',
+        )
+
+        # define second layer
+        self.conv2 = HeteroConv(
+            {et: 
+             GATv2Conv(
+                in_channels=(-1, -1),
+                out_channels=64,  
+                heads=num_heads,  
+                concat=True,  
+                negative_slope=0.2,
+                add_self_loops=False
+            )
+             for et in self.edge_types},
+            aggr='mean',
+        )
 
         # layernorm for each node type after conv1 and conv2
         self.ln1 = torch.nn.ModuleDict({nt: LayerNorm(hidden_channels * num_heads) for nt in node_types})
@@ -62,33 +92,26 @@ class DiffHeteroGAT(torch.nn.Module):
         self.pkgname_projector = torch.nn.Linear(400, 256)
         # define attention pool for node and edge
         self.node_pool = attenpool.MultiTypeAttentionPooling(in_dim=256)
+
         self.edge_pool = attenpool.MultiTypeEdgePooling(edge_attr_dim=edge_attr_dim)
 
+        node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
+        
+        global_node_id_map = load_global_node_id_map(node_id_map_file)
+        self.reverse_node_id_map = {v: k for k, v in global_node_id_map.items()}
+
+        # for ranking purpose
+        self.global_edge_atten_map = defaultdict(float)
+        self.global_node_rank_map = defaultdict(float)
+        self.global_node_eco_system_map = defaultdict(lambda: defaultdict(float))
+        self.latest_attn_weights = {}
+        self.latest_edge_index_map = {}
+
         self.loss_fn = CompositeLoss(lambda_contrastive=0.0, lambda_sparsity=0.01, lambda_entropy=0.01)
+
         # Classifier for binary classification (output of size 1), consider extra input for edge info
         self.classifier = LazyLinear(1)
 
-        self.enable_debug = enable_debug
-        self.latest_attn_weights = {}
-        self.latest_edge_index_map = {}
-        self.reverse_node_id_map = {}
-
-        if self.enable_debug:
-            node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
-            global_node_id_map = load_global_node_id_map(node_id_map_file)
-            self.reverse_node_id_map = {v: k for k, v in global_node_id_map.items()}
-
-    def _build_hetero_gat(self, num_heads):
-        return HeteroConv({
-            et: GATv2Conv(
-                in_channels=(-1, -1),
-                out_channels=64,
-                heads=num_heads,
-                concat=True,
-                negative_slope=0.2,
-                add_self_loops=False
-            ) for et in self.edge_types
-        }, aggr='mean')
 
     @staticmethod
     def to_local_edge_indices(x_dict, edge_index_dict):
@@ -110,59 +133,71 @@ class DiffHeteroGAT(torch.nn.Module):
         attn_weights = {}
         out_dict = {}
 
-        # Only compute explanation info when enabled
-        edge_atten_map = {} if self.enable_debug else None
-        edge_index_map = {} if self.enable_debug else None
+        ori_x_dict = x_dict.copy()
+
+        # Create a dictionary to store the mapping between nodes and attention scores
+        edge_atten_map = {}
+
+        # create a dict to save edge_list with original node value
+        edge_index_map = {}
+
 
         for edge_type, conv in conv_module.convs.items():
             src_type, _, tgt_type = edge_type
 
-            if src_type not in x_dict or tgt_type not in x_dict:
-                if self.enable_debug:
-                    print(f"Warning: {src_type if src_type not in x_dict else tgt_type} not in x_dict.")
-                    continue
+            # ensure src_type is "Package_Name"
+            if src_type == 'Package_Name':
+                if src_type not in x_dict:
+                    print(f"Warning: {src_type} not in x_dict, skipping this edge type.")
+                    continue  # If Package_Name is missing, skip this edge type
+                x_src = x_dict[src_type]
+        
+            # Ensure that tgt_type exists in x_dict
+            if tgt_type not in x_dict:
+                print(f"Warning: {tgt_type} not in x_dict, skipping this edge type.")
+                continue  # Skip if the target type is missing
 
-            x_src, x_tgt = x_dict[src_type], x_dict[tgt_type]
+            x_tgt = x_dict[tgt_type]
+            x_src = x_dict[src_type]
             edge_index = local_edge_index_dict[edge_type]
-            edge_index = edge_index.coalesce().indices() if edge_index.is_sparse else edge_index
 
+            if edge_index.is_sparse:
+                edge_index = edge_index.coalesce().indices()
+
+            # shape of alpha is [num_edges, num_heads]
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
+            alpha.requires_grad_(True)
+            alpha.retain_grad()
+            self.latest_attn_weights[edge_type] = alpha
+            self.latest_edge_index_map[edge_type] = edge_index.T.tolist() 
 
-            # Detach alpha from autograd + move to CPU
-            if self.enable_debug and self.reverse_node_id_map:
-                alpha = alpha.detach().cpu()
-                self.latest_attn_weights[edge_type] = alpha
-                self.latest_edge_index_map[edge_type] = edge_index.T.tolist()
+            assert edge_index.shape[1] == alpha.shape[0], \
+            f"Edge count mismatch: edge_index has {edge_index.shape[1]}, but alpha has {alpha.shape[0]}"
 
-                # Slow reverse lookup ONLY when debugging
-                for i in range(edge_index.shape[1]):
-                    src_node = get_ori_node_value(edge_index[0, i].item(), self.reverse_node_id_map)
-                    tgt_node = get_ori_node_value(edge_index[1, i].item(), self.reverse_node_id_map)
-                    edge_atten_map[(src_node, tgt_node)] = alpha[i, 0].item()
-                    edge_index_map.setdefault(edge_type, []).append((src_node, tgt_node))
+            # reverse lookup of global node indices to original node values
+            for i in range(edge_index.shape[1]):
+                src_node_idx = edge_index[0, i].item()
+                tgt_node_idx = edge_index[1, i].item()
+
+                # retrieve the original node values using reverse lookup
+                src_node_value = get_ori_node_value(src_node_idx, self.reverse_node_id_map)
+                tgt_node_value = get_ori_node_value(tgt_node_idx, self.reverse_node_id_map)
+
+                # Store the edge, original node values, and the attention score in the map
+                edge_atten_map[(src_node_value, tgt_node_value)] = alpha[i, 0].item()
+                # collect edge in node-value form
+                edge_index_map.setdefault(edge_type, []).append((src_node_value, tgt_node_value))
 
             attn_weights[edge_type] = alpha
-
-            if tgt_type in out_dict:
-                out_dict[tgt_type] = torch.add(out_dict[tgt_type], out)
-            else:
-                out_dict[tgt_type] = out
+            out_dict[tgt_type] = out_dict.get(tgt_type, 0) + out
         
         # After the first pass, merge the updated features with the original ones for all node types
-        for node_type, x in x_dict.items():
-            out_dict.setdefault(node_type, x)
+        for node_type in ori_x_dict:
+            if node_type not in out_dict:
+                out_dict[node_type] = ori_x_dict[node_type]
 
         return out_dict, attn_weights, edge_atten_map, edge_index_map
 
-    def _process_x_dict(self, x_dict_input, norm_layer):
-        return {
-            node_type: (
-                F.relu(norm_layer[node_type](self.pkgname_projector(x))) if node_type == "Package_Name" and x.shape[-1] == 400
-                else F.relu(norm_layer[node_type](x)) if node_type in norm_layer and x.shape[-1] == 256
-                else x
-            )
-            for node_type, x in x_dict_input.items()
-        }
 
     def forward(self, batch, **kwargs):
         '''
@@ -173,31 +208,64 @@ class DiffHeteroGAT(torch.nn.Module):
         x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict = parse_batch_dict(batch)
 
         # --- First conv ---
-        local_edge_index_dict = self.to_local_edge_indices(x_dict, edge_index_dict)
+        local_edge_index_dict_1 = self.to_local_edge_indices(x_dict, edge_index_dict)
+
+        # ---- first conv with attention
         x_dict_1, attn_weights_1, edge_atten_map_1, edge_index_map_1 =\
-            self.cal_attn_weight(self.conv1, x_dict, local_edge_index_dict)
+            self.cal_attn_weight(self.conv1, x_dict, local_edge_index_dict_1)
+
         # apply layernorm, exclude Package_Name
-        x_dict = self._process_x_dict(x_dict_1, self.ln1)
+        x_dict = {}
+        for node_type, x in x_dict_1.items():
+            if node_type == "Package_Name":
+                if x.shape[-1] == 400:
+                    x = self.pkgname_projector(x)
+                x_dict[node_type] = x
+
+            if node_type in self.ln1 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln1[node_type](x))
+            else:
+                x_dict[node_type] = x
 
         # --- Second conv ---
+        # Second conv still on original graph (no pooling)
+        local_edge_index_dict_2 = self.to_local_edge_indices(x_dict, edge_index_dict)
+
         x_dict_2, attn_weights_2, edge_atten_map_2, edge_index_map_2 = \
-            self.cal_attn_weight(self.conv2, x_dict, local_edge_index_dict)
-        x_dict = self._process_x_dict(x_dict_2, self.ln2)
+            self.cal_attn_weight(self.conv2, x_dict, local_edge_index_dict_2)
+
+        x_dict = {}
+        for node_type, x in x_dict_2.items():
+            if node_type == "Package_Name":
+                if x.shape[-1] == 400:
+                    x = self.pkgname_projector(x)
+                x_dict[node_type] = x
+            elif node_type in self.ln2 and x.shape[-1] == 256:
+                x_dict[node_type] = F.relu(self.ln2[node_type](x))
+            else:
+                x_dict[node_type] = x
 
         # ---- Final node pooling (excluding Package_Name)
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
         batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
 
-        node_pool = self.node_pool(x_dict_target, batch_dict_target).to(device)
-        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict).to(device)
+        node_pool = self.node_pool(x_dict_target, batch_dict_target)
 
+        # ---- Final edge pooling using attention weights
+        # edge_avg_attr = {k: v.mean(dim=1) for k, v in attn_weights_1.items()}
+        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict)
+        node_pool = node_pool.to(device)
+        edge_pool = edge_pool.to(device)
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
         logits = self.classifier(graph_embed).squeeze(-1)
-
         # align with the shape
-        label = batch.label if batch.label.dim() > 0 else batch.label.unsqueeze(0)
-        logits = logits if logits.dim() > 0 else logits.unsqueeze(0)
+        if logits.dim() == 0:
+            logits = logits.unsqueeze(0)
+        if batch.label.dim() == 0:
+            label = batch.label.unsqueeze(0)
+        else:
+            label = batch.label
 
         # compute composite loss
         loss = self.loss_fn(

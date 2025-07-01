@@ -18,3 +18,4 @@ shap==0.47.2
 xgboost==3.0.2
 accelerate==1.7.0
 ace_tools==0.0
+mitrecve==1.1.1
