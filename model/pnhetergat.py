@@ -76,11 +76,18 @@ class PNHeteroGAT(torch.nn.Module):
         self.latest_attn_weights = {}
         self.latest_edge_index_map = {}
         self.reverse_node_id_map = {}
+        self.reverse_node_id_vec = []
 
         if self.enable_debug:
             node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
             global_node_id_map = load_global_node_id_map(node_id_map_file)
             self.reverse_node_id_map = {v: k for k, v in global_node_id_map.items()}
+            # Vectorized reverse map
+            max_index = max(self.reverse_node_id_map.keys(), default=-1)
+            reverse_list = [""] * (max_index + 1)
+            for idx, name in self.reverse_node_id_map.items():
+                reverse_list[idx] = name
+            self.reverse_node_id_vec = reverse_list
 
     def _build_hetero_gat(self, num_heads):
         return HeteroConv({
@@ -124,7 +131,7 @@ class PNHeteroGAT(torch.nn.Module):
             if src_type not in x_dict or tgt_type not in x_dict:
                 if self.enable_debug:
                     print(f"Warning: {src_type if src_type not in x_dict else tgt_type} not in x_dict.")
-                    continue
+                continue
 
             x_src, x_tgt = x_dict[src_type], x_dict[tgt_type]
             edge_index = local_edge_index_dict[edge_type]
@@ -133,17 +140,20 @@ class PNHeteroGAT(torch.nn.Module):
             out, (_, alpha) = conv((x_src, x_tgt), edge_index, return_attention_weights=True)
 
             # Detach alpha from autograd + move to CPU
-            if self.enable_debug and self.reverse_node_id_map:
+            if self.enable_debug and self.reverse_node_id_vec:
                 alpha = alpha.detach().cpu()
                 self.latest_attn_weights[edge_type] = alpha
                 self.latest_edge_index_map[edge_type] = edge_index.T.tolist()
 
-                # Slow reverse lookup ONLY when debugging
-                for i in range(edge_index.shape[1]):
-                    src_node = get_ori_node_value(edge_index[0, i].item(), self.reverse_node_id_map)
-                    tgt_node = get_ori_node_value(edge_index[1, i].item(), self.reverse_node_id_map)
-                    edge_atten_map[(src_node, tgt_node)] = alpha[i, 0].item()
-                    edge_index_map.setdefault(edge_type, []).append((src_node, tgt_node))
+                src_indices = edge_index[0].tolist()
+                tgt_indices = edge_index[1].tolist()
+                src_nodes = [self.reverse_node_id_vec[i] for i in src_indices]
+                tgt_nodes = [self.reverse_node_id_vec[i] for i in tgt_indices]
+                scores = alpha[:, 0].tolist()
+
+                edges = list(zip(src_nodes, tgt_nodes))
+                edge_atten_map.update(dict(zip(edges, scores)))
+                edge_index_map.setdefault(edge_type, []).extend(edges)
 
             attn_weights[edge_type] = alpha
 
@@ -196,8 +206,8 @@ class PNHeteroGAT(torch.nn.Module):
         x_dict_target = {ntype: x for ntype, x in x_dict.items() if ntype != "Package_Name"}
         batch_dict_target = {k: v for k, v in batch_dict.items() if k != 'Package_Name'}
         
-        node_pool = self.node_pool(x_dict_target, batch_dict_target).to(device)
-        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict).to(device)
+        node_pool = self.node_pool(x_dict_target, batch_dict_target)
+        edge_pool = self.edge_pool(edge_attr_dict, edge_batch_dict)
         
         # last attention weight calculation after pooling
         graph_embed = torch.cat([node_pool, edge_pool], dim=-1)  # shape [2F]
