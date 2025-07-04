@@ -232,6 +232,9 @@ if __name__ == "__main__":
         num_heads=4, 
         processed_dir=data_path,
     )
+    # activate debug early before any forward pass
+    model1.activate_debug(data_path)
+    model1.enable_debug = False
 
     with torch.no_grad():
         dummy_batch = train_loader.dataset[0].to('cpu')
@@ -247,15 +250,16 @@ if __name__ == "__main__":
     start_time = datetime.now()
     loss_list = []
     explain_every = 5  # Toggle explanation every N epochs
-    has_activated_debug = False
     warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
-    
+
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
-        if epoch % explain_every == 0 and not model1.enable_debug:
-            model1.activate_debug(data_path)
-            has_activated_debug = True
+
+        if epoch % explain_every == 0:
+            model1.enable_debug = True
+        else:
+            model1.enable_debug = False
 
         if epoch < warmup_epochs:
             model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
@@ -367,6 +371,9 @@ if __name__ == "__main__":
         num_heads=4, 
         processed_dir=data_path
     )
+    # activate debug early before any forward pass
+    model3.activate_debug(data_path)
+    model3.enable_debug = False
 
     # Step 3: forward to initialize Lazy module
     with torch.no_grad():
@@ -384,15 +391,16 @@ if __name__ == "__main__":
     start_time = datetime.now()
     loss_list = []
     explain_every = 5  # Toggle explanation every N epochs
-    has_activated_debug = False
     warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
 
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
-        if epoch % explain_every == 0 and not model3.enable_debug:
-            model3.activate_debug(data_path)
-            has_activated_debug = True
+
+        if epoch % explain_every == 0:
+            model3.enable_debug = True
+        else:
+            model3.enable_debug = False
 
         if epoch < warmup_epochs:
             model3.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)

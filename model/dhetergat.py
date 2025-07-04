@@ -194,7 +194,6 @@ class DiffHeteroGAT(torch.nn.Module):
                     edge_atten_map.update(dict(zip(edges, scores)))
                     edge_index_map.setdefault(edge_type, []).extend(edges)
 
-
             attn_weights[edge_type] = alpha
 
             if tgt_type in out_dict:
