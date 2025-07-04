@@ -14,7 +14,7 @@ import torch
 from ext.iter_loader import IterSubGraphs, collate_hetero_data
 from utils.evals import plot_loss_curve
 from ana import diffanalyzer, explain
-# from torch_geometric.loader import DataLoader
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from datetime import datetime
 import os
@@ -29,9 +29,18 @@ import psutil
 import os
 from accelerate import Accelerator
 from accelerate.utils import DistributedDataParallelKwargs
-from torch.utils.data import DistributedSampler
-import torch_geometric
 import time
+import numpy as np
+import random
+
+def set_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+set_seed(42)
 
 # 1) Build kwargs handlers if needed
 ddp_kwargs = (DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -129,9 +138,7 @@ if __name__ == "__main__":
     # # define the starting time
     # start_time = datetime.now()
     # loss_list = []
-    # explain_every = 5  # Toggle explanation every N epochs
     # for epoch in range(num_epochs):
-    #     model.enable_debug = (epoch % explain_every == 0)
     #     model2.train()
     #     total_loss = 0
     #     for batch in train_loader:
@@ -223,7 +230,7 @@ if __name__ == "__main__":
         hidden_channels=64, 
         edge_attr_dim=16, 
         num_heads=4, 
-        processed_dir=data_path
+        processed_dir=data_path,
     )
 
     with torch.no_grad():
@@ -240,18 +247,45 @@ if __name__ == "__main__":
     start_time = datetime.now()
     loss_list = []
     explain_every = 5  # Toggle explanation every N epochs
+    has_activated_debug = False
+    warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
+    
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
+        if epoch % explain_every == 0 and not model1.enable_debug:
+            model1.activate_debug(data_path)
+            has_activated_debug = True
 
-        model1.enable_debug = (epoch % explain_every == 0)
+        if epoch < warmup_epochs:
+            model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
+        else:
+            # choose small sparsity to avoid loss explosion
+            model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+
         total_loss = 0
+
         for batch in train_loader:
             optimizer1.zero_grad()
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
+
+            # print out loss to adjust extreme large loss
+            # losses = model1.loss_fn(
+            #     cls_loss=F.binary_cross_entropy_with_logits(logits, batch.label.float()),
+            #     attn_weights=attn_weights_pooled,
+            #     return_details=True
+            # )
+            # loss = losses['total']
+            # if epoch >= warmup_epochs:
+            #     print({k: float(v) for k, v in losses.items()})
+
             total_loss += loss.item()
             accelerator.backward(loss)
             optimizer1.step()
+
+            if model1.enable_debug:
+                attn_weights_pooled = model1.latest_attn_weights
+                edge_index_map_pool = model1.latest_edge_index_map
 
         avg_loss = total_loss / len(train_loader)
         loss_list.append(avg_loss)
@@ -278,7 +312,7 @@ if __name__ == "__main__":
     # final rank
     print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-    edge_scores, node_scores = explain.explain_with_gradcam(
+    edge_scores, node_scores = explain.explain_with_gradcam_vec(
         model=accelerator.unwrap_model(model1),
         dataloader=train_loader,
         device=device,
@@ -323,7 +357,6 @@ if __name__ == "__main__":
     # save the model after training
     torch.save(model1.state_dict(), "diff_heterogat_model.pth")
 
-
     print("-----------------------------------------------")
     print("Training PNHeteroGAT ...")
     model_name = "PNHeteroGAT"
@@ -351,20 +384,45 @@ if __name__ == "__main__":
     start_time = datetime.now()
     loss_list = []
     explain_every = 5  # Toggle explanation every N epochs
+    has_activated_debug = False
+    warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
+
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
-        model3.enable_debug = (epoch % explain_every == 0)
+        if epoch % explain_every == 0 and not model3.enable_debug:
+            model3.activate_debug(data_path)
+            has_activated_debug = True
+
+        if epoch < warmup_epochs:
+            model3.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
+        else:
+            # choose small sparsity to avoid loss explosion
+            model3.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+
         total_loss = 0
         for batch in train_loader:
             optimizer3.zero_grad()
             # here the loss is a dict
             logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = \
                 model3(batch)
+            # print out loss to adjust extreme large loss
+            # losses = model3.loss_fn(
+            #     cls_loss=F.binary_cross_entropy_with_logits(logits, batch.label.float()),
+            #     attn_weights=attn_weights_pooled,
+            #     return_details=True
+            # )
+            # loss = losses['total']
+            # if epoch >= warmup_epochs:
+            #     print({k: float(v) for k, v in losses.items()})
 
             total_loss += loss.item()
             accelerator.backward(loss)
             optimizer3.step()
+
+            if model3.enable_debug:
+                attn_weights_pooled = model3.latest_attn_weights
+                edge_index_map_pool = model3.latest_edge_index_map
 
         avg_loss = total_loss / len(train_loader)
         loss_list.append(avg_loss)
@@ -391,7 +449,7 @@ if __name__ == "__main__":
     # final rank
     print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco, top_k_global_nodes))
 
-    edge_scores, node_scores = explain.explain_with_gradcam(
+    edge_scores, node_scores = explain.explain_with_gradcam_vec(
         model=accelerator.unwrap_model(model3),
         dataloader=train_loader,
         device=device,

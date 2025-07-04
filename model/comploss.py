@@ -71,7 +71,8 @@ class CompositeLoss(nn.Module):
             for w in attn_weights.values():
                 a = F.softmax(w.mean(dim=1), dim=0)
                 entropy_loss += -(a * torch.log(a+1e-6)).sum()
-                sparsity_loss += w.abs().sum()
+                # sparsity_loss += w.abs().sum()
+                sparsity_loss += w.abs().mean()
             
             entropy_loss = self.lambda_entropy * entropy_loss
             sparsity_loss = self.lambda_sparsity * sparsity_loss
@@ -87,5 +88,12 @@ class CompositeLoss(nn.Module):
             return loss
 
 
+    def update_lambda(self, lambda_contrastive=None, lambda_sparsity=None, lambda_entropy=None):
+        if lambda_contrastive is not None:
+            self.lambda_contrastive = lambda_contrastive
+        if lambda_sparsity is not None:
+            self.lambda_sparsity = lambda_sparsity
+        if lambda_entropy is not None:
+            self.lambda_entropy = lambda_entropy
 
 

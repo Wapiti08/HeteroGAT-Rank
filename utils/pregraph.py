@@ -76,71 +76,6 @@ def parse_batch_dict(batch: HeteroData) -> Tuple[
 
     return x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
 
-
-# def parse_batch_dict(batch: HeteroData)-> Tuple[
-#         Dict[str, torch.Tensor],  # x_dict
-#         Dict[Tuple[str, str, str], torch.Tensor],  # edge_index_dict
-#         Dict[str, torch.Tensor],  # batch_dict
-#         Dict[Tuple[str, str, str], torch.Tensor],  # edge_attr_dict
-#         Dict[Tuple[str, str, str], torch.Tensor]   # edge_batch_dict
-#         ]:
-    
-#     is_batched = any('batch' in batch[node_type] for node_type in batch.node_types)
-
-#     x_dict = {
-#         node_type: batch[node_type].x
-#         for node_type in batch.node_types if 'x' in batch[node_type]
-#     }
-#     edge_index_dict = {
-#         edge_type: batch[edge_type].edge_index
-#         for edge_type in batch.edge_types if 'edge_index' in batch[edge_type]
-#     }
-#     edge_attr_dict = {
-#         edge_type: batch[edge_type].edge_attr
-#         for edge_type in batch.edge_types if 'edge_attr' in batch[edge_type]
-#     }
-
-#     if is_batched:
-#         batch_dict = {
-#             node_type: batch[node_type].batch
-#             for node_type in batch.node_types if 'batch' in batch[node_type]
-#         }
-#         edge_batch_dict = {
-#             edge_type: batch[edge_type].batch
-#             for edge_type in batch.edge_types if 'batch' in batch[edge_type]
-#         }
-
-#         # If edge_batch_dict is empty, construct manually
-#         if not edge_batch_dict:
-#             B = batch.label.size(0)
-#             for edge_type, edge_attr in edge_attr_dict.items():
-#                 if edge_attr.is_sparse:
-#                     # number of nonzero rows
-#                     E = edge_attr._nnz()
-#                 else:
-#                     E = edge_attr.size(0)
-#                 edge_batch_dict[edge_type] = (
-#                     torch.arange(B, device=edge_attr.device)
-#                     .repeat_interleave(E // B)[:E]
-#                 )
-#             # for debug
-
-#     else:
-#         batch_dict = {
-#             node_type: torch.zeros(batch[node_type].x.size(0), dtype=torch.long, device=batch[node_type].x.device)
-#             for node_type in x_dict
-#         }
-#         edge_batch_dict = {
-#             edge_type: torch.zeros(
-#                 batch[edge_type].edge_attr._nnz() if batch[edge_type].edge_attr.is_sparse else batch[edge_type].edge_attr.size(0),
-#                 dtype=torch.long,
-#                 device=batch[edge_type].edge_attr.device
-#             )
-#             for edge_type in edge_attr_dict}
-
-#     return x_dict, edge_index_dict, batch_dict, edge_attr_dict, edge_batch_dict
-
-
 def miss_check(x_dict, node_types, hidden_dim):
     for node_type in node_types:
         if node_type not in x_dict:
@@ -193,6 +128,44 @@ def global_to_local_map(x_dict, edge_index_dict):
     return global_to_local_map
 
 
+def remap_edge_indices_vect(edge_index, g2l_map, src_type, tgt_type):
+    '''
+    Vectorized remapping of edge_index from global to local indices.
+    Args:
+        edge_index: Tensor shape [2, num_edges]
+        g2l_map: Dict[node_type][global_id] = local_id
+        src_type, tgt_type: node type strings
+    Returns:
+        remapped_edge_index: Tensor [2, num_valid_edges]
+    
+    '''
+    # Ensure dense edge_index
+    if edge_index.is_sparse:
+        edge_index = edge_index.coalesce().indices()
+
+    src, tgt = edge_index[0], edge_index[1]
+
+    # Convert g2l_map from dict[int → int] → Tensor[int] for fast indexing
+    src_map = g2l_map[src_type]
+    tgt_map = g2l_map[tgt_type]
+
+    src_cpu = src.cpu().tolist()
+    tgt_cpu = tgt.cpu().tolist()
+
+    src_local = []
+    tgt_local = []
+
+    for s, t in zip(src_cpu, tgt_cpu):
+        if s in src_map and t in tgt_map and src_map[s] != tgt_map[t]:
+            src_local.append(src_map[s])
+            tgt_local.append(tgt_map[t])
+
+    if len(src_local) == 0:
+        return torch.empty((2, 0), dtype=torch.long, device=edge_index.device)
+
+    return torch.tensor([src_local, tgt_local], dtype=torch.long, device=edge_index.device)
+
+
 def remap_edge_indices(edge_index, global_to_local_mapping, src_type, tgt_type):
     """
     Remap the global node indices in edge_index to local indices using the local_to_global_mapping.
@@ -215,13 +188,13 @@ def remap_edge_indices(edge_index, global_to_local_mapping, src_type, tgt_type):
     tgt_local = []
     # avoid miss matched indices
     for s, t in zip(src, tgt):
-            s_item = s.item()
-            t_item = t.item()
-            
-            # filter out self-loop
-            if s_item in src_map and t_item in tgt_map and src_map[s_item] != tgt_map[t_item]:
-                src_local.append(src_map[s_item])
-                tgt_local.append(tgt_map[t_item])
+        s_item = s.item()
+        t_item = t.item()
+        
+        # filter out self-loop
+        if s_item in src_map and t_item in tgt_map and src_map[s_item] != tgt_map[t_item]:
+            src_local.append(src_map[s_item])
+            tgt_local.append(tgt_map[t_item])
 
     return torch.tensor([src_local, tgt_local], dtype=torch.long, device=edge_index.device)
 
