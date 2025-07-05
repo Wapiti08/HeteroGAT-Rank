@@ -102,15 +102,14 @@ class DiffHeteroGAT(torch.nn.Module):
         Can be called during training to enable explanation-related features.
         """
         self.enable_debug = True
-        if not self.reverse_node_id_vec:
-            node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
-            global_node_id_map = load_global_node_id_map(node_id_map_file)
+        node_id_map_file = Path(processed_dir).parent.joinpath('process_state.pkl')
+        global_node_id_map = load_global_node_id_map(node_id_map_file)
 
-            self.reverse_node_id_map = {v: k for k, v in global_node_id_map.items()}
+        self.reverse_node_id_map = {v: k for k, v in global_node_id_map.items()}
+        required_size = max(self.reverse_node_id_map.keys(), default=-1) + 1
 
-            # Vectorized reverse map
-            max_index = max(self.reverse_node_id_map.keys(), default=-1)
-            reverse_list = [""] * (max_index + 1)
+        if len(self.reverse_node_id_vec) < required_size:
+            reverse_list = [""] * required_size
             for idx, name in self.reverse_node_id_map.items():
                 reverse_list[idx] = name
             self.reverse_node_id_vec = reverse_list

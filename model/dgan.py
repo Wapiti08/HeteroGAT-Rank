@@ -5,8 +5,6 @@
  '''
 
 import sys
-from dask.distributed import Client
-import dask
 from pathlib import Path
 sys.path.insert(0, Path(sys.path[0]).parent.as_posix())
 from torch.cuda.amp import autocast
@@ -232,9 +230,13 @@ if __name__ == "__main__":
         num_heads=4, 
         processed_dir=data_path,
     )
+
     # activate debug early before any forward pass
     model1.activate_debug(data_path)
     model1.enable_debug = False
+
+    print("reverse_node_id_vec length:", len(model1.reverse_node_id_vec))
+    print("max ID in reverse_node_id_map:", max(model1.reverse_node_id_map.keys()))
 
     with torch.no_grad():
         dummy_batch = train_loader.dataset[0].to('cpu')
@@ -250,22 +252,22 @@ if __name__ == "__main__":
     start_time = datetime.now()
     loss_list = []
     explain_every = 5  # Toggle explanation every N epochs
-    warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
+    # warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
 
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
-
-        if epoch % explain_every == 0:
-            model1.enable_debug = True
+        # make sure final epoch is True for debug
+        if (epoch+1) % explain_every == 0:
+            model1.activate_debug(data_path)
         else:
             model1.enable_debug = False
 
-        if epoch < warmup_epochs:
-            model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
-        else:
-            # choose small sparsity to avoid loss explosion
-            model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+        # if epoch < warmup_epochs:
+        #     model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
+        # else:
+        # choose small sparsity to avoid loss explosion
+        model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
 
         total_loss = 0
 
@@ -391,22 +393,23 @@ if __name__ == "__main__":
     start_time = datetime.now()
     loss_list = []
     explain_every = 5  # Toggle explanation every N epochs
-    warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
+    # warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
 
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
 
-        if epoch % explain_every == 0:
-            model3.enable_debug = True
+        # make sure final epoch is True for debug
+        if (epoch+1) % explain_every == 0:
+            model3.activate_debug(data_path)
         else:
             model3.enable_debug = False
 
-        if epoch < warmup_epochs:
-            model3.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
-        else:
-            # choose small sparsity to avoid loss explosion
-            model3.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+        # if epoch < warmup_epochs:
+        #     model3.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
+        # else:
+        # choose small sparsity to avoid loss explosion
+        model3.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
 
         total_loss = 0
         for batch in train_loader:
