@@ -257,17 +257,22 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
+
+        unwrapped_model1 = accelerator.unwrap_model(model1)
+
         # make sure final epoch is True for debug
         if (epoch+1) % explain_every == 0:
-            model1.activate_debug(data_path)
+            unwrapped_model1.activate_debug(data_path)
         else:
-            model1.enable_debug = False
+            unwrapped_model1.enable_debug = False
 
         # if epoch < warmup_epochs:
         #     model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
         # else:
         # choose small sparsity to avoid loss explosion
-        model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+        # model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+            
+        unwrapped_model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
 
         total_loss = 0
 
@@ -289,9 +294,9 @@ if __name__ == "__main__":
             accelerator.backward(loss)
             optimizer1.step()
 
-            if model1.enable_debug:
-                attn_weights_pooled = model1.latest_attn_weights
-                edge_index_map_pool = model1.latest_edge_index_map
+            if unwrapped_model1.enable_debug:
+                attn_weights_pooled = unwrapped_model1.latest_attn_weights
+                edge_index_map_pool = unwrapped_model1.latest_edge_index_map
 
         avg_loss = total_loss / len(train_loader)
         loss_list.append(avg_loss)
@@ -399,6 +404,8 @@ if __name__ == "__main__":
         print(f"Training on epoch {epoch}")
         epoch_start_time = time.time()
 
+        unwrapped_model3 = accelerator.unwrap_model(model3)
+
         # make sure final epoch is True for debug
         if (epoch+1) % explain_every == 0:
             model3.activate_debug(data_path)
@@ -409,7 +416,7 @@ if __name__ == "__main__":
         #     model3.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
         # else:
         # choose small sparsity to avoid loss explosion
-        model3.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+        unwrapped_model3.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
 
         total_loss = 0
         for batch in train_loader:
@@ -431,9 +438,9 @@ if __name__ == "__main__":
             accelerator.backward(loss)
             optimizer3.step()
 
-            if model3.enable_debug:
-                attn_weights_pooled = model3.latest_attn_weights
-                edge_index_map_pool = model3.latest_edge_index_map
+            if unwrapped_model3.enable_debug:
+                attn_weights_pooled = unwrapped_model3.latest_attn_weights
+                edge_index_map_pool = unwrapped_model3.latest_edge_index_map
 
         avg_loss = total_loss / len(train_loader)
         loss_list.append(avg_loss)
