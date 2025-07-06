@@ -5,6 +5,7 @@ import torch
 from torch_geometric.nn import HeteroConv, GATv2Conv, global_mean_pool
 from model.comploss import CompositeLoss
 from optim import attenpool
+from sklearn.metrics import precision_score, recall_score, f1_score
 import torch.nn.functional as F
 import os
 from utils import evals
@@ -50,7 +51,7 @@ class GraphPoolingModule(torch.nn.Module):
         return graph_embed
 
 class DiffHeteroGAT(torch.nn.Module):
-    def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir, enable_debug=False):
+    def __init__(self, hidden_channels, edge_attr_dim, num_heads, enable_debug=False, pos_weight= None):
         '''
         args:
             in_channels: the dimensionality of the input node features
@@ -95,6 +96,8 @@ class DiffHeteroGAT(torch.nn.Module):
         self.latest_edge_index_map = {}
         self.reverse_node_id_map = {}
         self.reverse_node_id_vec = []
+
+        self.pos_weight = pos_weight
 
     def activate_debug(self, processed_dir: Path):
         """
@@ -261,16 +264,22 @@ class DiffHeteroGAT(torch.nn.Module):
             print("Label :", label)
 
         # compute composite loss
+        bce_loss = F.binary_cross_entropy_with_logits(
+            logits, 
+            label.float(),
+            pos_weight=self.pos_weight.to(logits.device) if self.pos_weight is not None else None
+        )
+
         loss = self.loss_fn(
-            cls_loss=F.binary_cross_entropy_with_logits(logits, label.float()),
+            cls_loss=bce_loss,
             attn_weights=attn_weights_2
         )
 
         return logits, loss, attn_weights_2, edge_atten_map_2, edge_index_map_2
     
     
-    def evaluate(self, logits, batch, threshold=0.5):
-        metrics = evals.evaluate(logits, batch, threshold)
+    def evaluate(self, logits, labels, threshold=0.5):
+        metrics = evals.evaluate(logits, labels, threshold)
         print("evaluation result: \n", metrics )
         return metrics
 

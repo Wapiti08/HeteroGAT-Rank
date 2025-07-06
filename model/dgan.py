@@ -31,12 +31,14 @@ import time
 import numpy as np
 import random
 
+# for reproducibility
 def set_seed(seed):
     torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True  # makes CUDA deterministic
+    torch.backends.cudnn.benchmark = False     # may reduce speed but helps reproducibility
 
 set_seed(42)
 
@@ -73,7 +75,7 @@ if __name__ == "__main__":
         node_json = [json.loads(line) for line in fr]
 
     print("Creating subgraph dataloader")
-    num_epochs = 15
+    num_epochs = 20
 
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
@@ -94,6 +96,11 @@ if __name__ == "__main__":
         collate_fn=lambda batch: collate_hetero_data(batch, device),
         drop_last=True
     )
+    # for imbalanced label distribution
+    labels = [train_loader.dataset[i].label.item() for i in range(len(train_loader.dataset))]
+    num_pos = sum(labels)
+    num_neg = len(labels) - num_pos
+    pos_weight = torch.tensor(num_neg / (num_pos + 1e-8))
 
     test_loader = DataLoader(
         test_data,
@@ -186,7 +193,7 @@ if __name__ == "__main__":
     # print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
     # print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
 
-    # # ----- EVALUATION -----
+    # ----- EVALUATION -----
     # model2.eval()
     # all_logits = []
     # all_labels = []
@@ -228,7 +235,7 @@ if __name__ == "__main__":
         hidden_channels=64, 
         edge_attr_dim=16, 
         num_heads=4, 
-        processed_dir=data_path,
+        pos_weight=pos_weight
     )
 
     # activate debug early before any forward pass
@@ -353,7 +360,7 @@ if __name__ == "__main__":
     # Compute metrics
     metrics = accelerator.unwrap_model(model1).evaluate(all_logits, all_labels)
 
-    print("Evaluation Metrics for MaskedHeteroGAT model: ", metrics)
+    print("Evaluation Metrics for DiffHeteroGAT model: ", metrics)
 
     accelerator.unwrap_model(model1).plot_metrics(
         all_labels,
@@ -376,7 +383,7 @@ if __name__ == "__main__":
         hidden_channels=64, 
         edge_attr_dim=16,
         num_heads=4, 
-        processed_dir=data_path
+        pos_weight=pos_weight
     )
     # activate debug early before any forward pass
     model3.activate_debug(data_path)

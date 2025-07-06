@@ -56,7 +56,7 @@ class GraphPoolingModule(torch.nn.Module):
 
 
 class PNHeteroGAT(torch.nn.Module):
-    def __init__(self, hidden_channels, edge_attr_dim, num_heads, processed_dir, enable_debug=False):
+    def __init__(self, hidden_channels, edge_attr_dim, num_heads, enable_debug=False, pos_weight=None):
         '''
         args:
             in_channels: the dimensionality of the input node features
@@ -100,6 +100,9 @@ class PNHeteroGAT(torch.nn.Module):
         self.latest_edge_index_map = {}
         self.reverse_node_id_map = {}
         self.reverse_node_id_vec = []
+
+        # for imbalanced class distribution
+        self.pos_weight = pos_weight
 
     def activate_debug(self, processed_dir: Path):
         """
@@ -265,8 +268,14 @@ class PNHeteroGAT(torch.nn.Module):
         label = batch.label.view(-1)  # shape: [B]
         
         # compute composite loss --- loss is a dict type
+        bce_loss = F.binary_cross_entropy_with_logits(
+            logits, 
+            label.float(),
+            pos_weight=self.pos_weight.to(logits.device) if self.pos_weight is not None else None
+        )
+
         loss_dict = self.loss_fn(
-            cls_loss=F.binary_cross_entropy_with_logits(logits, label.float()),
+            cls_loss=bce_loss,
             attn_weights=attn_weights_2,
             graph_embeds=graph_embed,
             labels = batch.label.float(),
@@ -274,7 +283,6 @@ class PNHeteroGAT(torch.nn.Module):
         )
 
         return logits, loss_dict['total'], attn_weights_2, edge_atten_map_2, edge_index_map_2
-    
     
     def evaluate(self, logits, batch, threshold=0.5):
         metrics = evals.evaluate(logits, batch, threshold)
