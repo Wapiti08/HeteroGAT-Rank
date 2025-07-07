@@ -75,7 +75,7 @@ if __name__ == "__main__":
         node_json = [json.loads(line) for line in fr]
 
     print("Creating subgraph dataloader")
-    num_epochs = 20
+    num_epochs = 15
 
     # split into train/test
     train_data, test_data = train_test_split(dataset, test_size=0.2, random_state=32)
@@ -227,153 +227,153 @@ if __name__ == "__main__":
     # torch.save(model2.state_dict(), "heterogat_model_state.pth")
 
 
-    print("-----------------------------------------------")
-    print("Training DiffHeteroGAT ...")
-    model_name = "DiffHeteroGAT"
-    # Initialize model with required parameters
-    model1 = DiffHeteroGAT(
-        hidden_channels=64, 
-        edge_attr_dim=16, 
-        num_heads=4, 
-        pos_weight=pos_weight
-    )
+    # print("-----------------------------------------------")
+    # print("Training DiffHeteroGAT ...")
+    # model_name = "DiffHeteroGAT"
+    # # Initialize model with required parameters
+    # model1 = DiffHeteroGAT(
+    #     hidden_channels=64, 
+    #     edge_attr_dim=16, 
+    #     num_heads=4, 
+    #     pos_weight=pos_weight
+    # )
 
-    # activate debug early before any forward pass
-    model1.activate_debug(data_path)
-    model1.enable_debug = False
+    # # activate debug early before any forward pass
+    # model1.activate_debug(data_path)
+    # model1.enable_debug = False
 
-    print("reverse_node_id_vec length:", len(model1.reverse_node_id_vec))
-    print("max ID in reverse_node_id_map:", max(model1.reverse_node_id_map.keys()))
+    # print("reverse_node_id_vec length:", len(model1.reverse_node_id_vec))
+    # print("max ID in reverse_node_id_map:", max(model1.reverse_node_id_map.keys()))
 
-    with torch.no_grad():
-        dummy_batch = train_loader.dataset[0].to('cpu')
-        _ = model1(dummy_batch)
+    # with torch.no_grad():
+    #     dummy_batch = train_loader.dataset[0].to('cpu')
+    #     _ = model1(dummy_batch)
 
-    optimizer1 = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
+    # optimizer1 = torch.optim.Adam(model1.parameters(), lr=0.001, weight_decay=1e-4)
 
-    model1, optimizer1 = accelerator.prepare(
-            model1, optimizer1
-                )
+    # model1, optimizer1 = accelerator.prepare(
+    #         model1, optimizer1
+    #             )
 
-    # define the starting time
-    start_time = datetime.now()
-    loss_list = []
-    explain_every = 5  # Toggle explanation every N epochs
-    # warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
+    # # define the starting time
+    # start_time = datetime.now()
+    # loss_list = []
+    # explain_every = 5  # Toggle explanation every N epochs
+    # # warmup_epochs = 5 # after this epoch number to introduce explain loss to avoid loss explosion
 
-    for epoch in range(num_epochs):
-        print(f"Training on epoch {epoch}")
-        epoch_start_time = time.time()
+    # for epoch in range(num_epochs):
+    #     print(f"Training on epoch {epoch}")
+    #     epoch_start_time = time.time()
 
-        unwrapped_model1 = accelerator.unwrap_model(model1)
+    #     unwrapped_model1 = accelerator.unwrap_model(model1)
 
-        # make sure final epoch is True for debug
-        if (epoch+1) % explain_every == 0:
-            unwrapped_model1.activate_debug(data_path)
-        else:
-            unwrapped_model1.enable_debug = False
+    #     # make sure final epoch is True for debug
+    #     if (epoch+1) % explain_every == 0:
+    #         unwrapped_model1.activate_debug(data_path)
+    #     else:
+    #         unwrapped_model1.enable_debug = False
 
-        # if epoch < warmup_epochs:
-        #     model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
-        # else:
-        # choose small sparsity to avoid loss explosion
-        # model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+    #     # if epoch < warmup_epochs:
+    #     #     model1.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)
+    #     # else:
+    #     # choose small sparsity to avoid loss explosion
+    #     # model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
             
-        unwrapped_model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
+    #     unwrapped_model1.loss_fn.update_lambda(lambda_sparsity=0.01, lambda_entropy=0.01)
 
-        total_loss = 0
+    #     total_loss = 0
 
-        for batch in train_loader:
-            optimizer1.zero_grad()
-            logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
+    #     for batch in train_loader:
+    #         optimizer1.zero_grad()
+    #         logits, loss, attn_weights_pooled, edge_atten_map_pool, edge_index_map_pool = model1(batch)
 
-            # print out loss to adjust extreme large loss
-            # losses = model1.loss_fn(
-            #     cls_loss=F.binary_cross_entropy_with_logits(logits, batch.label.float()),
-            #     attn_weights=attn_weights_pooled,
-            #     return_details=True
-            # )
-            # loss = losses['total']
-            # if epoch >= warmup_epochs:
-            #     print({k: float(v) for k, v in losses.items()})
+    #         # print out loss to adjust extreme large loss
+    #         # losses = model1.loss_fn(
+    #         #     cls_loss=F.binary_cross_entropy_with_logits(logits, batch.label.float()),
+    #         #     attn_weights=attn_weights_pooled,
+    #         #     return_details=True
+    #         # )
+    #         # loss = losses['total']
+    #         # if epoch >= warmup_epochs:
+    #         #     print({k: float(v) for k, v in losses.items()})
 
-            total_loss += loss.item()
-            accelerator.backward(loss)
-            optimizer1.step()
+    #         total_loss += loss.item()
+    #         accelerator.backward(loss)
+    #         optimizer1.step()
 
-            if unwrapped_model1.enable_debug:
-                attn_weights_pooled = unwrapped_model1.latest_attn_weights
-                edge_index_map_pool = unwrapped_model1.latest_edge_index_map
+    #         if unwrapped_model1.enable_debug:
+    #             attn_weights_pooled = unwrapped_model1.latest_attn_weights
+    #             edge_index_map_pool = unwrapped_model1.latest_edge_index_map
 
-        avg_loss = total_loss / len(train_loader)
-        loss_list.append(avg_loss)
-        epoch_time = time.time() - epoch_start_time
+    #     avg_loss = total_loss / len(train_loader)
+    #     loss_list.append(avg_loss)
+    #     epoch_time = time.time() - epoch_start_time
 
-        print(f"For {model_name} Model: Epoch {epoch+1}, Loss: {avg_loss:.4f}, Time: {epoch_time:.2f} seconds")
+    #     print(f"For {model_name} Model: Epoch {epoch+1}, Loss: {avg_loss:.4f}, Time: {epoch_time:.2f} seconds")
 
-    plot_loss_curve(loss_list,f"{model_name}")
+    # plot_loss_curve(loss_list,f"{model_name}")
 
-    # After training
-    print(f"[{model_name}] Peak GPU memory: {torch.cuda.max_memory_allocated(device)/1024**2:.2f} MB")
-    print(f"[{model_name}] Peak GPU reserved: {torch.cuda.max_memory_reserved(device)/1024**2:.2f} MB")
-    print(f"[{model_name}] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
+    # # After training
+    # print(f"[{model_name}] Peak GPU memory: {torch.cuda.max_memory_allocated(device)/1024**2:.2f} MB")
+    # print(f"[{model_name}] Peak GPU reserved: {torch.cuda.max_memory_reserved(device)/1024**2:.2f} MB")
+    # print(f"[{model_name}] CPU memory usage (RSS): {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2:.2f} MB")
 
-    # rank last conv_weight_dict
-    top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
-    print("top k edges are:", top_k_edges)
-    # rank node by eco system
-    top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
-    print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
-    # rank node globally
-    top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
-    print("top global k edges are:", top_k_global_nodes)
-    # final rank
-    print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
+    # # rank last conv_weight_dict
+    # top_k_edges = diffanalyzer.rank_edges(attn_weights_pooled, edge_index_map_pool, 10, 1e-6)
+    # print("top k edges are:", top_k_edges)
+    # # rank node by eco system
+    # top_k_nodes_by_eco = diffanalyzer.rank_nodes_by_eco_system(edge_atten_map_pool, node_json, 10)
+    # print("top k nodes by ecosystem are:", top_k_nodes_by_eco)
+    # # rank node globally
+    # top_k_global_nodes = diffanalyzer.rank_nodes_global(edge_atten_map_pool, 10)
+    # print("top global k edges are:", top_k_global_nodes)
+    # # final rank
+    # print("final ranked results:", diffanalyzer.final_sample(top_k_edges, top_k_nodes_by_eco,top_k_global_nodes))
 
-    edge_scores, node_scores = explain.explain_with_gradcam_vec(
-        model=accelerator.unwrap_model(model1),
-        dataloader=train_loader,
-        device=device,
-        target_class=1,
-        max_batches=5  # to limit time/memory
-        )
+    # edge_scores, node_scores = explain.explain_with_gradcam_vec(
+    #     model=accelerator.unwrap_model(model1),
+    #     dataloader=train_loader,
+    #     device=device,
+    #     target_class=1,
+    #     max_batches=5  # to limit time/memory
+    #     )
 
-    print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
-    print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
+    # print("Top edges:", sorted(edge_scores.items(), key=lambda x: -x[1])[:10])
+    # print("Top nodes:", sorted(node_scores.items(), key=lambda x: -x[1])[:10])
 
-    # --- Evaluation -----
-    model1.eval()
-    all_logits = []
-    all_labels = []
+    # # --- Evaluation -----
+    # model1.eval()
+    # all_logits = []
+    # all_labels = []
 
-    with torch.no_grad():
-        for batch in test_loader:
-            batch = batch.to(device)
-            logits, _, _, _ ,_ = model1(batch)
-            all_logits.append(logits)
-            all_labels.append(batch['label'])
+    # with torch.no_grad():
+    #     for batch in test_loader:
+    #         batch = batch.to(device)
+    #         logits, _, _, _ ,_ = model1(batch)
+    #         all_logits.append(logits)
+    #         all_labels.append(batch['label'])
     
-    # Concatenate
-    all_logits = torch.cat(all_logits)
-    all_labels = torch.cat(all_labels)
+    # # Concatenate
+    # all_logits = torch.cat(all_logits)
+    # all_labels = torch.cat(all_labels)
 
-    # Compute metrics
-    metrics = accelerator.unwrap_model(model1).evaluate(all_logits, all_labels)
+    # # Compute metrics
+    # metrics = accelerator.unwrap_model(model1).evaluate(all_logits, all_labels)
 
-    print("Evaluation Metrics for DiffHeteroGAT model: ", metrics)
+    # print("Evaluation Metrics for DiffHeteroGAT model: ", metrics)
 
-    accelerator.unwrap_model(model1).plot_metrics(
-        all_labels,
-        torch.sigmoid(all_logits).cpu().numpy(),
-        metrics)
+    # accelerator.unwrap_model(model1).plot_metrics(
+    #     all_labels,
+    #     torch.sigmoid(all_logits).cpu().numpy(),
+    #     metrics)
 
-    time_spent = datetime.now() - start_time
-    hours, remainder = divmod(time_spent.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    print(f"Time spent for DiffHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
+    # time_spent = datetime.now() - start_time
+    # hours, remainder = divmod(time_spent.total_seconds(), 3600)
+    # minutes, seconds = divmod(remainder, 60)
+    # print(f"Time spent for DiffHeteroGAT (train and evaluate): {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
-    # save the model after training
-    torch.save(model1.state_dict(), "diff_heterogat_model.pth")
+    # # save the model after training
+    # torch.save(model1.state_dict(), "diff_heterogat_model.pth")
 
     print("-----------------------------------------------")
     print("Training PNHeteroGAT ...")
@@ -415,9 +415,9 @@ if __name__ == "__main__":
 
         # make sure final epoch is True for debug
         if (epoch+1) % explain_every == 0:
-            model3.activate_debug(data_path)
+            unwrapped_model3.activate_debug(data_path)
         else:
-            model3.enable_debug = False
+            unwrapped_model3.enable_debug = False
 
         # if epoch < warmup_epochs:
         #     model3.loss_fn.update_lambda(lambda_sparsity=0.0, lambda_entropy=0.0)

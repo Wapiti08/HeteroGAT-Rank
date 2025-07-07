@@ -79,7 +79,7 @@ def compute_desc_cluster_score(top_features_with_score, clustered_df, verbose=Tr
     # get the desc in clusters
     cluster_desc_map = (
         clustered_df
-        .groupby('desc_cluster')['desc']
+        .groupby('desc_cluster')['Desc']
         .agg(lambda x: x.value_counts().idxmax())
         .to_dict()
     )
