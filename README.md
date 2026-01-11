@@ -161,15 +161,3 @@ gdown --folder "{shared_link}"
     Max edges per type: {'Action': 128781, 'CMD': 2837, 'DNS': 7, 'socket_host': 7, 'socket_ip': 79, 'socket_port': 6}
     ```
 
-## Next Work
-- build ID to projection with: (node_type, value) 
-    ```
-    self.reverse_node_id_map = {
-        global_id: f"{node_type}:{value}"
-        for node_type, id_map in local_to_global.items()
-        for global_id, value in zip(id_map.values(), id_map.keys())
-    }
-    ```
-
-
-
