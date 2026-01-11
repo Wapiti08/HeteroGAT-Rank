@@ -1,5 +1,5 @@
-# DDGRL
-distributed differential graph representation learning for malicious indicators identification 
+# HeteroGAT-Rank
+Operational Runtime Behavior Mining for Open-Source Supply Chain Security
 
 ![Python](https://img.shields.io/badge/Python3-3.10-brightgreen.svg) 
 ![Golang](https://img.shields.io/badge/Go1.22.2-brightblue.svg) 
