@@ -59,6 +59,11 @@ Operational Runtime Behavior Mining for Open-Source Supply Chain Security
 
     ```
 
+- Resource Required:
+
+    Graph generation was conducted on a high-memory instance from Vast.ai2 (base-image:cuda-12.8.1-auto), equipped with 104 CPUs (Intel Xeon®
+Platinum 8272L), up to 2.91 TB RAM, and 1100 GB disk. Model training and feature analysis were performed on a GPU-optimized instance (base-image:cuda-12.4-auto), provisioned with 128 CPUs (Intel Xeon® Platinum 8462Y+), 1.97 TB RAM, two H100 SXM GPUs (159 GB total), and 1002 GB disk.
+
 ## Distributed Configuration
 
 ```
