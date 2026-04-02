@@ -19,49 +19,26 @@
 
  
  '''
+import sys
+from pathlib import Path
 
+sys.path.insert(0, Path.cwd().parent.as_posix())
 import pandas as pd
 from pathlib import Path
-import ray
 import numpy as np
 from collections import defaultdict
-import re
 from tqdm import tqdm
 from typing import List, Dict, Tuple
 import pickle
 
+from utils.prostring import process_string
+from utils.osptrack_decode import iter_dicts, get_dict, normalize_command, as_list
 
-def process_string(input_string, max_len=500):
-    # step1: split the string by spaces
-    parts = input_string.split()
+try:
+    import ray  # type: ignore
+except Exception:  # pragma: no cover
+    ray = None
 
-    # step2: remove repeated values -- keeps the order while removing duplicates
-    unique_parts = list(dict.fromkeys(parts))
-
-    # step3: keep only the last two layers of each path and remove hash-like parts
-    processed_parts = []
-    for part in unique_parts:
-        # remove hash-like parts
-        if re.search(r'[a-fA-F0-9\-]{5,}', part):
-            continue
-
-        # if the part looks like a path
-        if "/" in part:
-            path_parts = part.split("/")
-            # keep the last two layers
-            processed_part = '/'.join(path_parts[-2:])
-            processed_parts.append(processed_part)
-        else:
-            processed_parts.append(part)
-    
-    # step4: tjoin the processed parts into a string
-    result_string = ''.join(processed_parts)
-
-    # step5: trim the string to the max length if necessary
-    if len(result_string) > max_len:
-        result_string = result_string[:max_len]
-
-    return result_string
 
 class FeatureExtractor:
     
@@ -107,33 +84,32 @@ class FeatureExtractor:
         
         '''
         hostname_nodes, type_edges = [], []
-        for feature in ['import_DNS', 'install_DNS']:
-            entities = row.get(feature)
-            # check whether entities are not blank
-            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
-                for entity in entities:
-                    queries = entity.get("Queries", [])
-
-                    # ensure queries is iterable and contains valid data
-                    if isinstance(queries, (list, np.ndarray)) and len(queries) >0:
-                        for query in queries:
-                            hostname = query.get("Hostname")
-                            types = query.get("Types", [])
+        for feature in ["import_DNS", "install_DNS"]:
+            for entity in iter_dicts(row.get(feature)):
+                queries = get_dict(entity, "Queries", [])
+                for query in as_list(queries):
+                    if not isinstance(query, dict):
+                        continue
+                    hostname = query.get("Hostname")
+                    types = query.get("Types", [])
                         
-                            if hostname:
-                                # Create and add unique node
-                                if hostname not in [node["value"] for node in hostname_nodes]:
-                                    hostname_nodes.append(self._create_node(hostname, "DNS Host", row["Ecosystem"]))
-                                
-                                # Create and add edge with concatenated DNS types
-                                if isinstance(types, (list, np.ndarray)) and len(types) > 0:
-                                    concatenated_types = "_".join(types)
-                                    type_edges.append(self._create_edge(
-                                        source=f"{row['Name']}_{row['Version']}",
-                                        target=hostname, 
-                                        edge_type="DNS",
-                                        value=concatenated_types
-                                    ))
+                    if hostname:
+                        # Create and add unique node
+                        if hostname not in [node["value"] for node in hostname_nodes]:
+                            hostname_nodes.append(self._create_node(hostname, "DNS Host", row["Ecosystem"]))
+
+                        # Create and add edge with concatenated DNS types
+                        types_list = [str(t) for t in as_list(types)]
+                        if types_list:
+                            concatenated_types = "_".join(types_list)
+                            type_edges.append(
+                                self._create_edge(
+                                    source=f"{row['Name']}_{row['Version']}",
+                                    target=hostname,
+                                    edge_type="DNS",
+                                    value=concatenated_types,
+                                )
+                            )
 
         return hostname_nodes, type_edges
 
@@ -145,25 +121,25 @@ class FeatureExtractor:
         path_nodes, file_edges = [], []
         seen_paths = set()
 
-        for feature in ['import_Files', 'install_Files']:
-            entities = row.get(feature)
-            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
-                for entity in entities:
-                    raw_path = entity["Path"]
-                    path_value = process_string(raw_path)
-                    if path_value not in seen_paths:
-                        seen_paths.add(path_value)
-                        path_node = self._create_node(value=path_value, node_type="Path", eco=row["Ecosystem"])
-                        path_nodes.append(path_node)
+        for feature in ["import_Files", "install_Files"]:
+            for entity in iter_dicts(row.get(feature)):
+                raw_path = get_dict(entity, "Path")
+                if not raw_path:
+                    continue
+                path_value = process_string(str(raw_path))
+                if path_value not in seen_paths:
+                    seen_paths.add(path_value)
+                    path_node = self._create_node(value=path_value, node_type="Path", eco=row["Ecosystem"])
+                    path_nodes.append(path_node)
 
-                    file_edge = self._create_edge(
-                        source=f"{row['Name']}_{row['Version']}",
-                        target=path_value,
-                        edge_type="Action",
-                        value="_".join(k for k, v in entity.items() if v is True),
-                    )
+                file_edge = self._create_edge(
+                    source=f"{row['Name']}_{row['Version']}",
+                    target=path_value,
+                    edge_type="Action",
+                    value="_".join(k for k, v in entity.items() if v is True),
+                )
 
-                    file_edges.append(file_edge)
+                file_edges.append(file_edge)
 
         return path_nodes, file_edges
 
@@ -174,13 +150,11 @@ class FeatureExtractor:
         nodes, edges = [], []
         # collect all values and filter out repeated values
         ip_list, host_list, port_list = set(), set(), set()
-        for feature in ['import_Sockets', 'install_Sockets']:
-            entities = row.get(feature)
-            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
-                for entity in entities:
-                    ip_list.add(entity.get("Address"))
-                    host_list.update(entity.get("Hostnames", []))
-                    port_list.add(entity.get("Port"))
+        for feature in ["import_Sockets", "install_Sockets"]:
+            for entity in iter_dicts(row.get(feature)):
+                ip_list.add(get_dict(entity, "Address"))
+                host_list.update([h for h in as_list(get_dict(entity, "Hostnames", [])) if h])
+                port_list.add(get_dict(entity, "Port"))
 
         default_edge_type = "socket"
         default_edge_value = "access"
@@ -189,17 +163,17 @@ class FeatureExtractor:
         ip_list.discard("::1")
         port_list.discard(0)
         
-        nodes.extend([self._create_node(ip, "IP", row["Ecosystem"]) for ip in ip_list])
+        nodes.extend([self._create_node(ip, "IP", row["Ecosystem"]) for ip in ip_list if ip])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", ip, \
-                                        default_edge_type+"_ip", default_edge_value) for ip in ip_list])
+                                        default_edge_type+"_ip", default_edge_value) for ip in ip_list if ip])
 
-        nodes.extend([self._create_node(host, "Hostnames", row["Ecosystem"]) for host in host_list])
+        nodes.extend([self._create_node(host, "Hostnames", row["Ecosystem"]) for host in host_list if host])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", host, \
-                                        default_edge_type+"_host", default_edge_value) for host in host_list])
+                                        default_edge_type+"_host", default_edge_value) for host in host_list if host])
 
-        nodes.extend([self._create_node(str(port), "Port", row["Ecosystem"]) for port in port_list])
+        nodes.extend([self._create_node(str(port), "Port", row["Ecosystem"]) for port in port_list if port is not None])
         edges.extend([self._create_edge(f"{row['Name']}_{row['Version']}", port, \
-                                        default_edge_type+"_port", default_edge_value) for port in port_list])
+                                        default_edge_type+"_port", default_edge_value) for port in port_list if port is not None])
         
         return nodes, edges
 
@@ -212,15 +186,21 @@ class FeatureExtractor:
         default_edge_value = "execute"
 
         nodes, edges = [], []
-        for feature in ['import_Commands', 'install_Commands']:
-            entities = row.get(feature)
-            if isinstance(entities, (list, np.ndarray)) and len(entities) > 0:
-                for entity in entities:
-                    cmd = " ".join(entity.get("Command", []))
-                    # node type is Command not CMD
-                    nodes.append(self._create_node(cmd, "Command", row["Ecosystem"]))
-                    edges.append(self._create_edge(f"{row['Name']}_{row['Version']}", cmd, \
-                                                   default_edge_type, default_edge_value))
+        for feature in ["import_Commands", "install_Commands"]:
+            for entity in iter_dicts(row.get(feature)):
+                cmd = normalize_command(get_dict(entity, "Command", []))
+                if not cmd:
+                    continue
+                # node type is Command not CMD
+                nodes.append(self._create_node(cmd, "Command", row["Ecosystem"]))
+                edges.append(
+                    self._create_edge(
+                        f"{row['Name']}_{row['Version']}",
+                        cmd,
+                        default_edge_type,
+                        default_edge_value,
+                    )
+                )
         return nodes, edges
 
 
@@ -264,6 +244,11 @@ class FeatureExtractor:
         """
         Build knowledge graph in parallel using Ray.
         """
+        if ray is None:
+            raise ModuleNotFoundError(
+                "Ray is not installed. Install `ray` to use parallel extraction, "
+                "or call `_construct_subgraph` per-row / use non-parallel pipeline."
+            )
         chunks = self._split_chunks()
         # Create references to process each chunk in parallel
         futures = [_process_chunk.remote(chunk) for chunk in chunks]
@@ -275,17 +260,21 @@ class FeatureExtractor:
 
         return results
 
-@ray.remote
-def _process_chunk(chunk: pd.DataFrame) -> List[Dict]:
-    """Helper function to process a single chunk of the DataFrame."""
-    # define default data_path location
-    data_path = Path.cwd().parent.joinpath('data', 'label_data.pkl')
-    extractor = FeatureExtractor(data_path)  
-    return [extractor._construct_subgraph(row) for _, row in chunk.iterrows()]
+if ray is not None:
+    @ray.remote  # type: ignore[misc]
+    def _process_chunk(chunk: pd.DataFrame) -> List[Dict]:
+        """Helper function to process a single chunk of the DataFrame."""
+        data_path = Path.cwd().parent.joinpath("data", "label_data.pkl")
+        extractor = FeatureExtractor(data_path)
+        return [extractor._construct_subgraph(row) for _, row in chunk.iterrows()]
+else:
+    def _process_chunk(chunk: pd.DataFrame) -> List[Dict]:
+        raise ModuleNotFoundError("Ray is not installed; parallel chunk processing is unavailable.")
 
 
 def main():
-    # Initialize Ray
+    if ray is None:
+        raise ModuleNotFoundError("Ray is not installed; cannot run graphrep.py main().")
     ray.init(ignore_reinit_error=True)
 
     # Define the path to the data file

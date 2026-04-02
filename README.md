@@ -5,6 +5,42 @@ Operational Runtime Behavior Mining for Open-Source Supply Chain Security
 ![Golang](https://img.shields.io/badge/Go1.22.2-brightblue.svg) 
 ![CUDA](https://img.shields.io/badge/CUDA12.4-brightred.svg) 
 
+## Defined Canonical Node and Edge Types
+
+- Node Tyoes:
+    - PKG: package identity (eco, name, version)
+
+    - PROC: process (for QUT) or a placeholder “package-runtime” proc (for label_data)
+
+    - FILE: file/path (or QUT buckets like TMP_DIR, HOME_DIR)
+
+    - NET: network endpoint (IP, DOMAIN, PORT)
+
+    - SYSCALL: syscall name (QUT)
+
+    - CMD: command string (label_data)
+
+- Edge Types:
+    - LOAD: PKG → PROC
+
+    - INVOKE: PROC → SYSCALL (QUT)
+
+    - EXEC: PROC → CMD (label_data) and/or PROC → PROC (QUT filetop)
+
+    - READ / WRITE / DELETE: PROC → FILE (label_data file flags; QUT file buckets)
+
+    - CONNECT: PROC → NET (label_data sockets; QUT network if present)
+
+    - DNS_QUERY / RESOLVE: PROC → NET(domain) (label_data DNS)
+
+- Edge Attributes:
+    - phase: import vs install 
+
+    - raw_type / dns_types: DNS query types (A, AAAA)
+
+    - bytes/count: for QUT aggregated stats; optional for label_data
+
+
 ## Environment Setting Up:
 
 - General Package Support
@@ -44,9 +80,12 @@ Operational Runtime Behavior Mining for Open-Source Supply Chain Security
     # activate environment
     pyenv virtualenv 3.10.1 DDGRL
     pyenv local DDGRL
+
     # install libraries
-    pip3 install -r requirements.txt
-    # for quick test
+    pip install -r requirements-base.txt
+    pip install -r requirements.txt -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
+    
+    ## (optional) for quick test
     pip3 install pandas==2.2.3 tqdm==4.67.1 sentence-transformers==3.4.1 matplotlib==3.10.3 seaborn==0.13.2 shap==0.47.2 xgboost==3.0.2 accelerate==1.7.0 ace_tools==0.0 torch==2.6.0 torch-geometric==2.6.1 dask==2023.5.0 dask[distributed]==2023.5.0
 
     ```

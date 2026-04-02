@@ -40,7 +40,15 @@ def process_string(input_string, max_len=500):
     return result_string
 
 
-# Test the function with your input string
-input_string = 'rustc --crate-name build_script_build /usr/local/cargo/registry/src/github.com-1ecc6299db9ec823/crc32fast-1.3.2/build.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --cfg feature="default" --cfg feature="std" -C metadata=d495831a59ec6094 -C extra-filename=-d495831a59ec6094 --out-dir /app/target/debug/build/crc32fast-d495831a59ec6094 -L dependency=/app/target/debug/deps --cap-lints allow'
-processed_string = process_string(input_string)
-print(processed_string)
+if __name__ == "__main__":
+    # Quick manual sanity check (kept out of import path).
+    input_string = (
+        'rustc --crate-name build_script_build '
+        '/usr/local/cargo/registry/src/github.com-1ecc6299db9ec6094/crc32fast-1.3.2/build.rs '
+        '--error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat '
+        '--crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '
+        '--cfg feature="default" --cfg feature="std" -C metadata=d495831a59ec6094 '
+        '-C extra-filename=-d495831a59ec6094 --out-dir /app/target/debug/build/'
+        'crc32fast-d495831a59ec6094 -L dependency=/app/target/debug/deps --cap-lints allow'
+    )
+    print(process_string(input_string))
