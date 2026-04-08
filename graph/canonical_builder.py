@@ -7,6 +7,10 @@ across datasets (OSPTrack, QUT-DV25, etc.) and across baselines.
 """
 
 from __future__ import annotations
+import sys
+from pathlib import Path
+
+sys.path.insert(0, Path.cwd().parent.as_posix())
 
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, Iterable, List, Tuple

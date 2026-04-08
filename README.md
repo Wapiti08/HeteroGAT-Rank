@@ -105,6 +105,64 @@ Platinum 8272L), up to 2.91 TB RAM, and 1100 GB disk.
 
     - Model training and feature analysis were performed on a GPU-optimized instance (base-image:cuda-12.4-auto), provisioned with 128 CPUs (Intel Xeon® Platinum 8462Y+), 1.97 TB RAM, two H100 SXM GPUs (159 GB total), and 1002 GB disk.
 
+## Quick Test
+
+Below is a minimal end-to-end smoke run on **small-scale canonical graphs**.
+
+### 0) Run unit tests
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -q
+```
+
+### 1) Generate small-scale canonical graphs (QUT-DV25 + OSPTrack)
+
+This will generate both:
+- `*.events.json`: canonical nodes/edges (human-readable)
+- `*.graph.pt`: safe `data_dict` generated from `HeteroData.to_dict()` (for training)
+
+```bash
+# QUT-DV25: join multiple processed tables by Package_Name
+python scripts/generate_qut_canonical_graphs.py \
+  --limit-packages 200 \
+  --out artifacts/qut_a
+
+# OSPTrack: stream label_data.csv in chunks
+python scripts/generate_osptrack_canonical_graphs.py \
+  --limit-rows 200 \
+  --out artifacts/osp_a
+```
+
+### 2) Train a strong baseline GNN (R-GCN)
+
+```bash
+python comp/gnn_baselines/train_rgcn.py \
+  --graphs artifacts/qut_a artifacts/osp_a \
+  --epochs 5 \
+  --batch-size 8
+```
+
+### 3) Train the edge-mask explainer (PGExplainer-style)
+
+Note: for best explanations, pre-train/freeze the backbone first (Step 2).
+
+```bash
+python ranking_explain/train_pgexplainer.py \
+  --graphs artifacts/qut_a artifacts/osp_a \
+  --epochs 5 \
+  --batch-size 4
+```
+
+### 4) Produce hunting output (top-K important edges)
+
+Pick any generated `*.graph.pt` and print its top-K edges.
+
+```bash
+python ranking_explain/run_hunt.py \
+  --graph "artifacts/qut_a/10Cent10-999.0.4.tar.gz.graph.pt" \
+  --k 20
+```
+
 ## Distributed Configuration
 
 ```
@@ -117,71 +175,6 @@ accelerate config
 # default choice for other options
 # !no mixed precision --- in order to run sparse matrix
 
-```
-
-## Graph Representation
-
-- Individual Package Graph Representation (Undirected Graph):
-
-    - pack information:
-        
-        central_node (root node): {name}_{version}
-
-        central_node_attr: {ecosystem}
-
-    - import_Files (install_Files):
-
-        -- edge --> leaf node: ---{True Action: Read and Write}---> Path
-
-    - import_Sockets (install_Sockets):
-
-        remove port with 0 and address with '::1' and blank hostname / address / port
-
-        {IP} - {Hostname} - {Port}
-    
-    - import_Commands (install_Commands):
-
-        {command}: concat all strings
-        
-    
-    - import_DNS (install_DNS):
-
-        leaf node: {Hostname}
-
-        left node attr: {Types} in list
-
-## How to use
-
-- data generation:
-```
-python3 data_create.py
-```
-
-- graph analysis:
-```
-python3 mgan.py
-```
-
-- entropy analysis:
-```
-# under the golang project workdir
-go mod init go_entropy_ana
-go mod tidy
-go run *.go
-
-```
-
-- Single GPU Training:
-```
-CUDA_VISIBLE_DEVICES=2 python3 mgan.py
-
-```
-
-- Multiple GPUs Training:
-```
-accelerate launch dgan.py
-# optional: add port conflict from dask and accelerate -> automatically use next available port
-nohup accelerate launch --main_process_port=0 dgan.py >output.txt 2>&1 &
 ```
 
 ## Experiment Note
