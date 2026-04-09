@@ -69,6 +69,27 @@ def build_joined_events_for_package(
     return events
 
 
+def get_qut_label(pkg_name: str, tables: Dict[QUTKind, pd.DataFrame], kinds: List[QUTKind]) -> Optional[int]:
+    """Fetch the binary label from QUT `Level` column (0/1).
+
+    `Level` is consistent across all processed tables, so we can take it from the
+    first available table.
+    """
+    for kind in kinds:
+        df = tables[kind]
+        if "Level" not in df.columns:
+            continue
+        sub = df[df["Package_Name"] == pkg_name]
+        if sub.empty:
+            continue
+        v = sub.iloc[0].get("Level")
+        try:
+            return int(v)
+        except Exception:
+            return None
+    return None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=str, default="artifacts/qut_canonical")
@@ -109,14 +130,17 @@ def main() -> None:
 
     for pkg in pkg_names:
         events = build_joined_events_for_package(pkg, tables, kinds)
+        y = get_qut_label(pkg, tables, kinds)
         obj = _events_to_jsonable(events)
+        if y is not None:
+            obj["y"] = y
         (outdir / f"{pkg}.events.json").write_text(json.dumps(obj, ensure_ascii=False))
 
         if have_graph and build_heterodata_from_events is not None:
             # Build PyG graph and save safely as dict.
             try:
-                data = build_heterodata_from_events(events, y=None)
-                safe = {"data_dict": data.to_dict(), "package": pkg, "kinds": kinds, "num_events": len(events)}
+                data = build_heterodata_from_events(events, y=y)
+                safe = {"data_dict": data.to_dict(), "package": pkg, "kinds": kinds, "num_events": len(events), "y": y}
                 import torch  # type: ignore
 
                 torch.save(safe, outdir / f"{pkg}.graph.pt")

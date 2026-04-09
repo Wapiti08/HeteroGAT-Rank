@@ -1,0 +1,8 @@
+artifacts/osp_small/npm::@open-wa_wa-automate@4.32.16.graph.pt
+artifacts/osp_small/packagist::tencentcloud_af@3.0.746.graph.pt
+artifacts/osp_small/npm::@yobta_stores@0.0.24.graph.pt
+artifacts/osp_small/npm::tuyang-alarm@0.0.54.graph.pt
+artifacts/osp_small/rubygems::pulp_rpm_client@3.19.0.dev1666065560.graph.pt
+artifacts/osp_small/npm::@webqit_subscript@2.0.19.graph.pt
+artifacts/osp_small/npm::@bleco_notifications@0.3.2.graph.pt
+artifacts/osp_small/npm::@multifarm_widget@0.0.88.graph.pt

@@ -11,6 +11,24 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
+import re
+
+
+def _preprocess_csv_blob(s: str) -> str:
+    """Make `label_data.csv` blobs closer to valid Python literals.
+
+    The CSV often contains numpy pretty-printed arrays/lists that look like:
+      [{'a': 1}
+       {'a': 2}]
+    i.e., missing commas between dict items. This function inserts commas where safe.
+    """
+    # Normalize whitespace/newlines
+    s = s.replace("\r\n", "\n")
+
+    # Insert missing commas between adjacent dict literals inside a list.
+    # Example: "}\n {" or "} {" -> "}, {"
+    s = re.sub(r"\}\s*\{", "}, {", s)
+    return s
 
 
 def _safe_eval_osptrack(s: str) -> Any:
@@ -30,6 +48,8 @@ def _safe_eval_osptrack(s: str) -> Any:
     # Quick reject: if it doesn't look like a literal container, don't eval.
     if not (s.startswith("[") or s.startswith("{")):
         return s
+
+    s = _preprocess_csv_blob(s)
 
     def array(x, dtype=None):  # noqa: ANN001
         return x

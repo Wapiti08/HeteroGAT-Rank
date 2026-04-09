@@ -1,0 +1,14 @@
+id,source,y,num_nodes_total,num_edges_total,num_node_types,num_edge_types,non_load_ratio,E_LOAD,has_LOAD,E_DEPEND,has_DEPEND,E_INVOKE,has_INVOKE,E_CONNECT,has_CONNECT,E_READ,has_READ,E_WRITE,has_WRITE,E_EXEC,has_EXEC,E_DNS_QUERY,has_DNS_QUERY,E_RESOLVE,has_RESOLVE,E_DELETE,has_DELETE
+10Cent10-999.0.4.tar.gz,qut,1,62,72,6,7,0.9166666666666666,6,1,0,0,33,1,2,1,1,1,5,1,25,1,0,0,0,0,0,0
+10Cent11-999.0.4.tar.gz,qut,1,64,74,6,7,0.918918918918919,6,1,0,0,34,1,2,1,1,1,6,1,25,1,0,0,0,0,0,0
+11Cent-999.0.0.tar.gz,qut,1,71,81,6,7,0.9259259259259259,6,1,0,0,42,1,2,1,1,1,5,1,25,1,0,0,0,0,0,0
+npm::@bleco_notifications@0.3.2,osptrack,0,2,1,2,1,0.0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+npm::@multifarm_widget@0.0.88,osptrack,0,514,561,3,3,0.9982174688057041,1,1,0,0,0,0,0,0,559,1,1,1,0,0,0,0,0,0,0,0
+npm::@open-wa_wa-automate@4.32.16,osptrack,0,2,1,2,1,0.0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+npm::@visivalab_hera-components@1.6.35,osptrack,0,31,31,3,3,0.967741935483871,1,1,0,0,0,0,0,0,29,1,1,1,0,0,0,0,0,0,0,0
+npm::@webqit_subscript@2.0.19,osptrack,0,730,903,3,3,0.9988925802879292,1,1,0,0,0,0,0,0,798,1,104,1,0,0,0,0,0,0,0,0
+npm::@yobta_stores@0.0.24,osptrack,0,692,851,3,4,0.9988249118683902,1,1,0,0,0,0,0,0,792,1,55,1,0,0,0,0,0,0,3,1
+npm::tuyang-alarm@0.0.54,osptrack,0,33,33,3,3,0.9696969696969697,1,1,0,0,0,0,0,0,31,1,1,1,0,0,0,0,0,0,0,0
+packagist::rickselby_laravel-exception-html@0.2.0,osptrack,0,157,166,3,3,0.9939759036144579,1,1,0,0,0,0,0,0,164,1,1,1,0,0,0,0,0,0,0,0
+packagist::tencentcloud_af@3.0.746,osptrack,0,254,310,3,4,0.9967741935483871,1,1,0,0,0,0,0,0,296,1,11,1,0,0,0,0,0,0,2,1
+rubygems::pulp_rpm_client@3.19.0.dev1666065560,osptrack,0,2,1,2,1,0.0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0

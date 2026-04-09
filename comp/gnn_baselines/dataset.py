@@ -37,13 +37,16 @@ def _load_graph_pt(path: Path) -> Tuple[HeteroData, GraphExample]:
 class CanonicalGraphDataset(Dataset):
     """Loads canonical graphs saved by scripts into `HeteroData` objects."""
 
-    def __init__(self, graph_dirs: Sequence[str | Path]):
+    def __init__(self, graph_dirs: Sequence[str | Path] = (), graph_files: Sequence[str | Path] = ()):
         self.paths: List[Path] = []
         for d in graph_dirs:
             p = Path(d)
             self.paths.extend(sorted(p.glob("*.graph.pt")))
+        for f in graph_files:
+            self.paths.append(Path(f))
+        self.paths = sorted(set(self.paths))
         if not self.paths:
-            raise FileNotFoundError(f"No *.graph.pt found under: {graph_dirs}")
+            raise FileNotFoundError(f"No *.graph.pt found under: {graph_dirs} (or via graph_files)")
 
     def __len__(self) -> int:
         return len(self.paths)

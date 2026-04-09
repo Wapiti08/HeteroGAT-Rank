@@ -26,6 +26,52 @@ def iter_csv_rows(path: Path, *, chunksize: int = 50_000, limit: Optional[int] =
                 return
 
 
+def iter_pkl_rows(path: Path, *, limit: Optional[int] = None, random_sample: bool = False, seed: int = 42) -> Iterator[Dict[str, Any]]:
+    """Iterate rows from `label_data.pkl`.
+
+    Note: `pd.read_pickle` loads the full DataFrame into memory. This is fine for
+    small-scale tests (e.g., limit=200/2000). For full-scale runs, consider
+    creating a smaller subset pickle first.
+    """
+    df = pd.read_pickle(path)
+    if limit is not None:
+        if random_sample and limit < len(df):
+            df = df.sample(n=limit, random_state=seed)
+        else:
+            df = df.head(limit)
+    for _, row in df.iterrows():
+        yield row.to_dict()
+
+
+def iter_pkl_rows_stratified(
+    path: Path,
+    *,
+    per_class: int,
+    seed: int = 42,
+    label_col: str = "Label",
+) -> Iterator[Dict[str, Any]]:
+    """Stratified sampling from pkl to ensure both labels are present."""
+    df = pd.read_pickle(path)
+    if label_col not in df.columns:
+        raise KeyError(f"Missing column {label_col} in {path}")
+
+    # Normalize label column to int {0,1} if possible.
+    labels = df[label_col]
+    df0 = df[labels == 0]
+    df1 = df[labels == 1]
+    if len(df0) == 0 or len(df1) == 0:
+        raise ValueError(f"Cannot stratify: label distribution is degenerate (0={len(df0)}, 1={len(df1)})")
+
+    n0 = min(per_class, len(df0))
+    n1 = min(per_class, len(df1))
+    s0 = df0.sample(n=n0, random_state=seed)
+    s1 = df1.sample(n=n1, random_state=seed)
+    out = pd.concat([s0, s1]).sample(frac=1.0, random_state=seed)  # shuffle
+
+    for _, row in out.iterrows():
+        yield row.to_dict()
+
+
 def events_to_jsonable(events) -> Dict[str, Any]:
     edges: List[Dict[str, Any]] = []
     nodes: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -47,12 +93,20 @@ def events_to_jsonable(events) -> Dict[str, Any]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--pkl", type=str, default="data/label_data.pkl")
     ap.add_argument("--csv", type=str, default="data/label_data.csv")
+    ap.add_argument("--prefer-pkl", action="store_true", default=True)
+    ap.add_argument("--no-prefer-pkl", action="store_false", dest="prefer_pkl")
     ap.add_argument("--out", type=str, default="artifacts/osptrack_canonical")
     ap.add_argument("--limit-rows", type=int, default=1000)
     ap.add_argument("--chunksize", type=int, default=50_000)
+    ap.add_argument("--random-sample", action="store_true", default=False)
+    ap.add_argument("--stratify-label", action="store_true", default=False)
+    ap.add_argument("--per-class", type=int, default=0, help="If --stratify-label, sample this many per label")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
+    pkl_path = Path(args.pkl)
     csv_path = Path(args.csv)
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -68,7 +122,20 @@ def main() -> None:
     except Exception:
         have_graph = False
 
-    for row in iter_csv_rows(csv_path, chunksize=args.chunksize, limit=args.limit_rows):
+    use_pkl = args.prefer_pkl and pkl_path.exists()
+    if use_pkl:
+        if args.stratify_label:
+            if args.per_class <= 0:
+                raise ValueError("--per-class must be > 0 when --stratify-label is set")
+            row_iter = iter_pkl_rows_stratified(pkl_path, per_class=args.per_class, seed=args.seed)
+        else:
+            row_iter = iter_pkl_rows(pkl_path, limit=args.limit_rows, random_sample=args.random_sample, seed=args.seed)
+    else:
+        if args.stratify_label:
+            raise ValueError("--stratify-label requires --prefer-pkl (CSV streaming stratification is unsupported)")
+        row_iter = iter_csv_rows(csv_path, chunksize=args.chunksize, limit=args.limit_rows)
+
+    for row in row_iter:
         events = extract_events(row)
         key = pkg_key(row).replace("/", "_")
         obj = events_to_jsonable(events)

@@ -78,6 +78,13 @@ class RGCNGraphClassifier(nn.Module):
         self._ensure_modules(num_node_types, num_relations, in_dim=self.hidden_dim)
         assert self.node_type_emb is not None
 
+        # Ensure modules live on the same device as the incoming batch.
+        dev = node_type.device
+        if self.node_type_emb.weight.device != dev:
+            self.node_type_emb = self.node_type_emb.to(dev)
+        for i, conv in enumerate(self.convs):
+            self.convs[i] = conv.to(dev)
+
         x = self.node_type_emb(node_type)
 
         # If relations grow across batches, RGCNConv needs to be resized.
@@ -85,9 +92,9 @@ class RGCNGraphClassifier(nn.Module):
         if getattr(self, "_num_relations", 0) < num_relations:
             self._num_relations = num_relations
             self.convs = nn.ModuleList()
-            self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=num_relations))
+            self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=num_relations).to(dev))
             for _ in range(self.num_layers - 1):
-                self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=num_relations))
+                self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=num_relations).to(dev))
 
         for conv in self.convs:
             x = conv(x, edge_index, edge_type)

@@ -163,6 +163,61 @@ python ranking_explain/run_hunt.py \
   --k 20
 ```
 
+## Data Split and Statistical Analysis
+
+### 1) Generate Split (Qut/OSP/Cross)
+```
+python scripts/make_splits.py \
+  --qut artifacts/qut_a \
+  --osp artifacts/osp_a \
+  --out splits_a \
+  --seed 42
+```
+
+### 2) Graph Type Statistic
+```
+python scripts/stats_canonical_graphs.py \
+  --graphs artifacts/qut_a artifacts/osp_a \
+  --out artifacts/stats_a
+```
+
+### 3) Train RGCN with split
+```
+# within QUT
+python comp/gnn_baselines/train_rgcn.py \
+  --train-list splits_a/qut_train.txt \
+  --test-list splits_a/qut_test.txt \
+  --epochs 5 --batch-size 8
+
+# within OSP
+python comp/gnn_baselines/train_rgcn.py \
+  --train-list splits_a/osp_train.txt \
+  --test-list splits_a/osp_test.txt \
+  --epochs 5 --batch-size 8
+
+# cross-domain
+python comp/gnn_baselines/train_rgcn.py \
+  --train-list splits_a/cross_train_qut.txt \
+  --test-list splits_a/cross_test_osp.txt \
+  --epochs 5 --batch-size 8
+
+```
+
+## Baseline Running
+
+### 1) different training data
+```
+# all data
+python comp/gnn_baselines/train_rgcn.py   --train-list splits_a/osp_train.txt   --test-list splits_a/osp_test.txt   --epochs 5 --batch-size 8 --seed 42
+
+# data excluding non-empty (remove all load)
+python comp/gnn_baselines/train_rgcn.py   --train-list splits_osp_nonempty/train.txt   --test-list splits_osp_nonempty/test.txt   --epochs 5 --batch-size 8 --seed 42
+
+# reweight all data
+python comp/gnn_baselines/train_rgcn.py   --train-list splits_a/osp_train.txt   --test-list splits_a/osp_test.txt   --reweight   --epochs 5 --batch-size 8 --seed 42
+
+```
+
 ## Distributed Configuration
 
 ```
