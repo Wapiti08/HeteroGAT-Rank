@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure repo root is importable when running as a script.
@@ -89,6 +91,57 @@ def get_qut_label(pkg_name: str, tables: Dict[QUTKind, pd.DataFrame], kinds: Lis
             return None
     return None
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
+def _atomic_torch_save(path: Path, obj: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    import torch  # type: ignore
+
+    torch.save(obj, tmp)
+    tmp.replace(path)
+
+
+def _process_one_package(payload: Dict[str, Any]) -> Tuple[str, int]:
+    # Imports inside worker.
+    from config.qut_canonical import extract_events_from_row as _extract
+
+    build_heterodata_from_events = None
+    if payload.get("have_graph", False):
+        try:
+            from graph import build_heterodata_from_events as _build  # noqa: WPS433
+
+            build_heterodata_from_events = _build
+        except Exception:
+            build_heterodata_from_events = None
+
+    pkg = str(payload["pkg"])
+    kinds: List[QUTKind] = payload["kinds"]
+    rows_by_kind: Dict[QUTKind, Dict[str, Any]] = payload["rows_by_kind"]
+    y = payload.get("y", None)
+    outdir = Path(payload["outdir"])
+
+    events: List = []
+    for kind in kinds:
+        row = rows_by_kind.get(kind)
+        if not row:
+            continue
+        events.extend(_extract(row, kind))
+
+    obj = _events_to_jsonable(events)
+    if y is not None:
+        obj["y"] = int(y)
+    _atomic_write_text(outdir / f"{pkg}.events.json", json.dumps(obj, ensure_ascii=False))
+
+    if build_heterodata_from_events is not None:
+        data = build_heterodata_from_events(events, y=y)
+        safe = {"data_dict": data.to_dict(), "package": pkg, "kinds": kinds, "num_events": len(events), "y": y}
+        _atomic_torch_save(outdir / f"{pkg}.graph.pt", safe)
+    return pkg, len(events)
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -101,6 +154,7 @@ def main() -> None:
         default="install,syscall,filetop,opensnoop,tcp,pattern",
         help="Comma-separated subset of: install,syscall,filetop,opensnoop,tcp,pattern",
     )
+    ap.add_argument("--workers", type=int, default=0, help="Parallel workers (0=auto, 1=disable)")
     args = ap.parse_args()
 
     kinds: List[QUTKind] = [k.strip() for k in args.kinds.split(",") if k.strip()]  # type: ignore[assignment]
@@ -128,25 +182,41 @@ def main() -> None:
     except Exception:
         have_graph = False
 
+    payloads: List[Dict[str, Any]] = []
+
     for pkg in pkg_names:
-        events = build_joined_events_for_package(pkg, tables, kinds)
+        # Prepare compact per-package payload (avoid passing whole DataFrames to workers).
+        rows_by_kind: Dict[QUTKind, Dict[str, Any]] = {}
+        for kind in kinds:
+            df = tables[kind]
+            sub = df[df["Package_Name"] == pkg]
+            if sub.empty:
+                continue
+            rows_by_kind[kind] = sub.iloc[0].to_dict()
         y = get_qut_label(pkg, tables, kinds)
-        obj = _events_to_jsonable(events)
-        if y is not None:
-            obj["y"] = y
-        (outdir / f"{pkg}.events.json").write_text(json.dumps(obj, ensure_ascii=False))
+        payloads.append(
+            {
+                "pkg": pkg,
+                "kinds": kinds,
+                "rows_by_kind": rows_by_kind,
+                "y": y,
+                "outdir": outdir.as_posix(),
+                "have_graph": have_graph,
+            }
+        )
 
-        if have_graph and build_heterodata_from_events is not None:
-            # Build PyG graph and save safely as dict.
-            try:
-                data = build_heterodata_from_events(events, y=y)
-                safe = {"data_dict": data.to_dict(), "package": pkg, "kinds": kinds, "num_events": len(events), "y": y}
-                import torch  # type: ignore
+    workers = args.workers
+    if workers <= 0:
+        workers = max(1, (os.cpu_count() or 2) // 2)
 
-                torch.save(safe, outdir / f"{pkg}.graph.pt")
-            except ModuleNotFoundError:
-                # torch/pyg missing in this interpreter; keep JSON-only output.
-                pass
+    if workers <= 1:
+        for pl in payloads:
+            _process_one_package(pl)
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_process_one_package, pl) for pl in payloads]
+            for fut in as_completed(futs):
+                _ = fut.result()
 
 
 if __name__ == "__main__":

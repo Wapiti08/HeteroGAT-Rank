@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import pandas as pd
@@ -90,6 +92,48 @@ def events_to_jsonable(events) -> Dict[str, Any]:
         )
     return {"nodes": list(nodes.values()), "edges": edges}
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
+def _atomic_torch_save(path: Path, obj: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    import torch  # type: ignore
+
+    torch.save(obj, tmp)
+    tmp.replace(path)
+
+
+def _process_one_row(row: Dict[str, Any], outdir: str, have_graph: bool) -> Tuple[str, int]:
+    # Import inside worker for multiprocessing compatibility.
+    from config.osptrack_canonical import extract_events as _extract_events, pkg_key as _pkg_key
+
+    build_heterodata_from_events = None
+    if have_graph:
+        try:
+            from graph import build_heterodata_from_events as _build  # noqa: WPS433
+
+            build_heterodata_from_events = _build
+        except Exception:
+            build_heterodata_from_events = None
+
+    outdir_p = Path(outdir)
+    events = _extract_events(row)
+    key = _pkg_key(row).replace("/", "_")
+    obj = events_to_jsonable(events)
+    obj["label"] = int(row.get("Label", 0)) if str(row.get("Label", "")).strip() != "" else None
+    obj["sub_label"] = row.get("Sub_Label")
+    _atomic_write_text(outdir_p / f"{key}.events.json", json.dumps(obj, ensure_ascii=False))
+
+    if build_heterodata_from_events is not None:
+        y = int(row.get("Label", 0))
+        data = build_heterodata_from_events(events, y=y)
+        safe = {"data_dict": data.to_dict(), "package": key, "num_events": len(events), "y": y}
+        _atomic_torch_save(outdir_p / f"{key}.graph.pt", safe)
+    return key, len(events)
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -104,6 +148,7 @@ def main() -> None:
     ap.add_argument("--stratify-label", action="store_true", default=False)
     ap.add_argument("--per-class", type=int, default=0, help="If --stratify-label, sample this many per label")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--workers", type=int, default=0, help="Parallel workers (0=auto, 1=disable)")
     args = ap.parse_args()
 
     pkl_path = Path(args.pkl)
@@ -135,24 +180,20 @@ def main() -> None:
             raise ValueError("--stratify-label requires --prefer-pkl (CSV streaming stratification is unsupported)")
         row_iter = iter_csv_rows(csv_path, chunksize=args.chunksize, limit=args.limit_rows)
 
-    for row in row_iter:
-        events = extract_events(row)
-        key = pkg_key(row).replace("/", "_")
-        obj = events_to_jsonable(events)
-        obj["label"] = int(row.get("Label", 0)) if str(row.get("Label", "")).strip() != "" else None
-        obj["sub_label"] = row.get("Sub_Label")
-        (outdir / f"{key}.events.json").write_text(json.dumps(obj, ensure_ascii=False))
+    workers = args.workers
+    if workers <= 0:
+        # conservative default to avoid memory spikes with pandas row dicts
+        workers = max(1, (os.cpu_count() or 2) // 2)
 
-        if have_graph and build_heterodata_from_events is not None:
-            try:
-                y = int(row.get("Label", 0))
-                data = build_heterodata_from_events(events, y=y)
-                safe = {"data_dict": data.to_dict(), "package": key, "num_events": len(events), "y": y}
-                import torch  # type: ignore
-
-                torch.save(safe, outdir / f"{key}.graph.pt")
-            except ModuleNotFoundError:
-                pass
+    if workers <= 1:
+        for row in row_iter:
+            _process_one_row(row, outdir.as_posix(), have_graph)
+    else:
+        rows = list(row_iter)
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_process_one_row, row, outdir.as_posix(), have_graph) for row in rows]
+            for fut in as_completed(futs):
+                _ = fut.result()
 
 
 if __name__ == "__main__":

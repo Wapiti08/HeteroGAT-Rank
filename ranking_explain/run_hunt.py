@@ -21,19 +21,49 @@ def load_one_graph(path: Path) -> HeteroData:
     obj = torch.load(path, map_location="cpu")
     return HeteroData.from_dict(obj["data_dict"])
 
+def _load_backbone(path: str, *, device: torch.device) -> RGCNGraphClassifier:
+    ckpt = torch.load(path, map_location=device)
+    kwargs = ckpt.get("model_kwargs", {"hidden_dim": 64, "num_layers": 2, "dropout": 0.2, "num_classes": 2})
+    model = RGCNGraphClassifier(**kwargs).to(device)
+    schema = ckpt.get("schema", {})
+    nnt = int(schema.get("num_node_types", 0))
+    nr = int(schema.get("num_relations", 0))
+    if nnt > 0 and nr > 0:
+        model.materialize(num_node_types=nnt, num_relations=nr, device=device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+    return model
+
+
+def _load_explainer(path: str, *, device: torch.device) -> PGExplainer:
+    ckpt = torch.load(path, map_location=device)
+    kwargs = ckpt.get("explainer_kwargs", {"hidden_dim": 64})
+    explainer = PGExplainer(**kwargs).to(device)
+    explainer.load_state_dict(ckpt["state_dict"])
+    explainer.eval()
+    return explainer
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--graph", type=str, required=True, help="Path to *.graph.pt")
     ap.add_argument("--k", type=int, default=10)
+    ap.add_argument("--backbone-ckpt", type=str, default="", help="Backbone checkpoint (.pt)")
+    ap.add_argument("--explainer-ckpt", type=str, default="", help="Explainer checkpoint (.pt)")
+    ap.add_argument("--device", type=str, default="cpu", help="cpu|cuda")
     args = ap.parse_args()
 
     p = Path(args.graph)
     data = load_one_graph(p)
-    data = data.to("cpu")
+    device = torch.device("cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu")
+    data = data.to(device)
 
-    backbone = RGCNGraphClassifier(hidden_dim=64, num_layers=2, dropout=0.2, num_classes=2)
-    explainer = PGExplainer(hidden_dim=64)
+    backbone = (
+        _load_backbone(args.backbone_ckpt, device=device)
+        if args.backbone_ckpt
+        else RGCNGraphClassifier(hidden_dim=64, num_layers=2, dropout=0.2, num_classes=2).to(device)
+    )
+    explainer = _load_explainer(args.explainer_ckpt, device=device) if args.explainer_ckpt else PGExplainer(hidden_dim=64).to(device)
 
     ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=args.k)
     print(f"graph={p.name} topk={len(ranked)}")

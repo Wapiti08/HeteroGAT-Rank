@@ -42,6 +42,16 @@ class RGCNGraphClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, num_classes),
         )
+        self._num_relations: int = 0
+
+    def materialize(self, *, num_node_types: int, num_relations: int, device: torch.device) -> None:
+        """Create dynamic modules with explicit sizes (for checkpoint loading)."""
+        self.node_type_emb = nn.Embedding(num_node_types, self.hidden_dim).to(device)
+        self._num_relations = int(num_relations)
+        self.convs = nn.ModuleList()
+        self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=self._num_relations).to(device))
+        for _ in range(self.num_layers - 1):
+            self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=self._num_relations).to(device))
 
     def _ensure_modules(self, num_node_types: int, num_relations: int, in_dim: int) -> None:
         if self.node_type_emb is None:

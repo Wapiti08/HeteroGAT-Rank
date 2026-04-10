@@ -28,11 +28,13 @@ class PGExplainer(nn.Module):
         hidden_dim: int,
         edge_type_emb_dim: int = 16,
         temperature: float = 1.0,
-        sparsity_coef: float = 0.05,
+        sparsity_target: float = 0.05,
+        sparsity_coef: float = 1.0,
         entropy_coef: float = 0.01,
     ) -> None:
         super().__init__()
         self.temperature = temperature
+        self.sparsity_target = sparsity_target
         self.sparsity_coef = sparsity_coef
         self.entropy_coef = entropy_coef
 
@@ -95,7 +97,9 @@ class PGExplainer(nn.Module):
         prob_masked = F.softmax(logits_masked, dim=-1)
 
         fidelity = F.kl_div(prob_masked.log(), prob_ref, reduction="batchmean")
-        sparsity = soft_mask.mean()
+        # Encourage the mask density to match a *target keep ratio* rather than
+        # collapsing to all-zeros (which is a trivial optimum if we only penalize mean(mask)).
+        sparsity = (soft_mask.mean() - float(self.sparsity_target)) ** 2
         ent = -(soft_mask * torch.log(soft_mask + 1e-8) + (1 - soft_mask) * torch.log(1 - soft_mask + 1e-8))
         entropy = ent.mean()
 

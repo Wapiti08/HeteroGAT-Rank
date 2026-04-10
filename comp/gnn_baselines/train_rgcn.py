@@ -26,6 +26,25 @@ def _read_list(path: str | None) -> list[str]:
         raise FileNotFoundError(p.as_posix())
     return [line.strip() for line in p.read_text().splitlines() if line.strip()]
 
+def _save_rgcn_checkpoint(*, path: Path, model: RGCNGraphClassifier) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    num_node_types = int(model.node_type_emb.num_embeddings) if model.node_type_emb is not None else 0
+    num_relations = int(getattr(model, "_num_relations", 0))
+    torch.save(
+        {
+            "kind": "rgcn_graph_classifier",
+            "model_kwargs": {
+                "hidden_dim": model.hidden_dim,
+                "num_layers": model.num_layers,
+                "dropout": model.dropout,
+                "num_classes": model.num_classes,
+            },
+            "schema": {"num_node_types": num_node_types, "num_relations": num_relations},
+            "state_dict": model.state_dict(),
+        },
+        path,
+    )
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -43,6 +62,7 @@ def main() -> None:
         default="5,10,20",
         help="Comma-separated list of K for Precision@K / Recall@K on test set",
     )
+    ap.add_argument("--save-ckpt", type=str, default="", help="Optional: path to save model checkpoint (.pt)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -102,6 +122,10 @@ def main() -> None:
             opt.step()
             total += float(loss.item())
         print(f"epoch {epoch} train_loss={total/max(1,len(train_loader)):.4f}")
+
+    if args.save_ckpt:
+        _save_rgcn_checkpoint(path=Path(args.save_ckpt), model=model)
+        print(f"saved_ckpt={args.save_ckpt}")
 
     # quick eval
     model.eval()

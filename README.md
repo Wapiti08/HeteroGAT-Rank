@@ -123,14 +123,16 @@ This will generate both:
 
 ```bash
 # QUT-DV25: join multiple processed tables by Package_Name
-python scripts/generate_qut_canonical_graphs.py \
-  --limit-packages 200 \
-  --out artifacts/qut_a
+python scripts/generate_osptrack_canonical_graphs.py \
+  --out artifacts/osp_2k \
+  --prefer-pkl --limit-rows 2000 \
+  --workers 8
 
 # OSPTrack: stream label_data.csv in chunks
-python scripts/generate_osptrack_canonical_graphs.py \
-  --limit-rows 200 \
-  --out artifacts/osp_a
+python scripts/generate_qut_canonical_graphs.py \
+  --out artifacts/qut_2k \
+  --limit-packages 2000 \
+  --workers 8
 ```
 
 ### 2) Train a strong baseline GNN (R-GCN)
@@ -215,6 +217,21 @@ python comp/gnn_baselines/train_rgcn.py   --train-list splits_osp_nonempty/train
 
 # reweight all data
 python comp/gnn_baselines/train_rgcn.py   --train-list splits_a/osp_train.txt   --test-list splits_a/osp_test.txt   --reweight   --epochs 5 --batch-size 8 --seed 42
+
+```
+
+### 2) Training
+
+```
+# train with save backbone
+python -m comp.gnn_baselines.train_rgcn --graphs artifacts/osp_a --epochs 5 --save-ckpt artifacts/checkpoints/rgcn_osp_a.pt
+
+# Train + save explainer
+python -m ranking_explain.train_pgexplainer --graphs artifacts/osp_a --epochs 5 --backbone-ckpt artifacts/checkpoints/rgcn_osp_a.pt --save-ckpt artifacts/checkpoints/pgexp_osp_a.pt
+
+# hunt with checkpoints
+python -m ranking_explain.run_hunt --graph "artifacts/osp_a/..." --k 20 --backbone-ckpt artifacts/checkpoints/rgcn_osp_a.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_a.pt
+
 
 ```
 
