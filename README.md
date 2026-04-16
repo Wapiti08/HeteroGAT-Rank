@@ -205,6 +205,8 @@ python comp/gnn_baselines/train_rgcn.py \
 
 ```
 
+
+
 ## Baseline Running
 
 ### 1) different training data
@@ -231,6 +233,65 @@ python -m ranking_explain.train_pgexplainer --graphs artifacts/osp_a --epochs 5 
 
 # hunt with checkpoints
 python -m ranking_explain.run_hunt --graph "artifacts/osp_a/..." --k 20 --backbone-ckpt artifacts/checkpoints/rgcn_osp_a.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_a.pt
+
+```
+
+## Hunting Running
+
+- Rarity Stats Generation
+```
+# for osptrack
+python scripts/build_benign_rarity_stats.py \
+  --graphs artifacts/osp_a \
+  --label 0 \
+  --out artifacts/stats/benign_rarity_stats_osp_full.json
+
+# for qut data
+python scripts/build_benign_rarity_stats.py \
+  --graphs artifacts/qut_a \
+  --label 0 \
+  --out artifacts/stats/benign_rarity_stats_qut_full.json
+
+```
+
+
+
+```
+
+# ================ for OSPTrack dataset ===============
+
+# malicious examples [pypi::oauth-less@1.0, pypi::systemdemon@2.9.graph.pt, npm::rechtspraak.namenlijst@0.9.0, pypi::adv2099m2@1.0.0]
+python -m ranking_explain.run_hunt \
+  --graph "artifacts/osp_a/pypi::systemdemon@2.9.graph.pt" --k 20 \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_a.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_a.pt \
+  --filter-net --dedup-dst --max-per-etype 5
+
+# with filter function for explict white list
+python -m ranking_explain.run_hunt \
+  --graph "artifacts/osp_a/pypi::systemdemon@2.9.graph.pt" --k 20 \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_a.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_a.pt \
+  --filter-net --filter-domains "pypi.org,files.pythonhosted.org,pythonhosted.org" \
+  --dedup-dst --max-per-etype 3
+
+# merge diverse IP addresses with temporal files
+python -m ranking_explain.run_hunt \
+  --graph "artifacts/osp_y1_3/pypi::adv2099m2@1.0.0.graph.pt" --k 80 \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_a.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_a.pt \
+  --filter-net --filter-net-ip \
+  --filter-system-files --system-file-prefixes "/dev/,dev/,pipe:[,host:[,socket:[,__pycache__/,/{dev=,{dev=" \
+  --filter-tmp-tempfile \
+  --filter-cmd-noise \
+  --rerank-tmp-suspicious \
+  --demote-load \
+  --dedup-dst --max-per-etype 8
+
+# ================ for QUT_DV25 =================
+
+
+
 
 
 ```
@@ -264,11 +325,4 @@ pip3 install gdown
 gdown --folder "{shared_link}"
 
 ```
-
-## Graph Feature 
-
-- For consistency, the number of node and edge should be aligned
-    ```
-    Max edges per type: {'Action': 128781, 'CMD': 2837, 'DNS': 7, 'socket_host': 7, 'socket_ip': 79, 'socket_port': 6}
-    ```
 

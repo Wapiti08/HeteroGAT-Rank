@@ -70,6 +70,18 @@ class RGCNGraphClassifier(nn.Module):
             for _ in range(self.num_layers - 1):
                 self.convs.append(RGCNConv(self.hidden_dim, self.hidden_dim, num_relations=num_relations))
 
+    def materialize(self, *, num_node_types: int, num_relations: int, device: torch.device | None = None) -> None:
+        """Materialize lazy modules for checkpoint loading.
+
+        Some scripts load checkpoints before any forward pass. This helper ensures
+        embeddings / conv layers exist with the expected shapes.
+        """
+        if device is None:
+            device = next(self.parameters(), torch.empty(0)).device  # type: ignore[arg-type]
+        self._ensure_modules(int(num_node_types), int(num_relations), in_dim=self.hidden_dim)
+        self._num_relations = int(num_relations)
+        self.to(device)
+
     def encode_homogeneous(self, data, edge_index_override=None, edge_type_override=None):
         """Encode a homogeneous PyG `Data` produced by `to_homogeneous`.
 

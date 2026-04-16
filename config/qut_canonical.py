@@ -8,6 +8,8 @@ across datasets.
 
 from __future__ import annotations
 
+import ast
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from config.osptrack_canonical import EdgeEvent, NodeRef
@@ -110,13 +112,66 @@ def extract_events_from_row(row: Dict[str, Any], kind: QUTKind) -> List[EdgeEven
         return events
 
     if kind == "tcp":
-        # IP/port access lists become NET nodes with CONNECT edges.
-        for ip in parse_listish(row.get("Remote_IP_Address_Access")):
-            n = NodeRef(type="NET", key=f"ip::{ip}", attrs={"kind": "ip", "ip": ip})
-            events.append(EdgeEvent(src=proc, etype="CONNECT", dst=n, attrs={"phase": "install"}))
-        for port in parse_listish(row.get("Remote_Port_Access")):
-            n = NodeRef(type="NET", key=f"port::{port}", attrs={"kind": "port", "port": port})
-            events.append(EdgeEvent(src=proc, etype="CONNECT", dst=n, attrs={"phase": "install"}))
+        # The processed QUT TCP table provides *counts* in Remote_*_Access columns.
+        # The actual remote IPs/ports appear inside the `State_Transition` dict string,
+        # e.g. "182.79.161.207 -> 443": 7, and port-state keys like "443 -> ESTABLISHED": 30.
+        state_raw = row.get("State_Transition")
+        if state_raw is None:
+            return events
+
+        state_s = str(state_raw).strip()
+        if not state_s or state_s.lower() == "nan":
+            return events
+
+        try:
+            trans = ast.literal_eval(state_s)
+        except Exception:
+            trans = {}
+
+        if not isinstance(trans, dict):
+            return events
+
+        ip_to_port = re.compile(r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})\s*->\s*(?P<port>\d{1,5})$")
+        port_to_state = re.compile(r"^(?P<port>\d{1,5})\s*->\s*(?P<state>[A-Z_]+)$")
+
+        for k, v in trans.items():
+            key = str(k).strip()
+            try:
+                count = int(v)
+            except Exception:
+                count = 1
+
+            m = ip_to_port.match(key)
+            if m:
+                ip = m.group("ip")
+                port = m.group("port")
+                n_ip = NodeRef(type="NET", key=f"ip::{ip}", attrs={"kind": "ip", "ip": ip})
+                n_port = NodeRef(type="NET", key=f"port::{port}", attrs={"kind": "port", "port": int(port)})
+                events.append(EdgeEvent(src=proc, etype="CONNECT", dst=n_ip, attrs={"phase": "install", "count": count}))
+                events.append(
+                    EdgeEvent(
+                        src=proc,
+                        etype="CONNECT",
+                        dst=n_port,
+                        attrs={"phase": "install", "count": count, "evidence": "state_transition"},
+                    )
+                )
+                continue
+
+            m = port_to_state.match(key)
+            if m:
+                port = m.group("port")
+                state = m.group("state")
+                n_port = NodeRef(type="NET", key=f"port::{port}", attrs={"kind": "port", "port": int(port)})
+                events.append(
+                    EdgeEvent(
+                        src=proc,
+                        etype="CONNECT",
+                        dst=n_port,
+                        attrs={"phase": "install", "count": count, "state": state, "evidence": "state_transition"},
+                    )
+                )
+                continue
         return events
 
     if kind == "pattern":
