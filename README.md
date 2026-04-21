@@ -2,9 +2,9 @@
 
 Operational Runtime Behavior Mining for Open-Source Supply Chain Security
 
-Python 
-Golang 
-CUDA 
+![Python](https://img.shields.io/badge/Python-3.10.1-brightgreen.svg)
+![Golang](https://img.shields.io/badge/Go-1.21.5-brightblue.svg)
+![CUDA](https://img.shields.io/badge/CUDA-12.4-brightred.svg)
 
 ## Defined Canonical Node and Edge Types
 
