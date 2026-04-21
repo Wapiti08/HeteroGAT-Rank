@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full_deps:
+        description: "Install full Python deps (slow, CPU-only)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-syntax:
+    name: Python (syntax)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install minimal deps
+        run: |
+          pip3 install --upgrade pip
+          if [ -f requirements-base.txt ]; then pip3 install -r requirements-base.txt; fi
+
+      - name: Compile all Python files
+        run: |
+          python -m compileall -q .
+
+  go-build:
+    name: Go (build/test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - name: Go build
+        run: |
+          go build ./...
+
+      - name: Go test
+        run: |
+          go test ./...
+
+  python-full-deps:
+    name: Python (full deps, optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_deps == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install full deps (CPU-only)
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+        run: |
+          pip3 install --upgrade pip
+          if [ -f requirements-base.txt ]; then pip3 install -r requirements-base.txt; fi
+          if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi
+
+      - name: Compile all Python files
+        run: |
+          python -m compileall -q .
+

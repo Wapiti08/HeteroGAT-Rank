@@ -7,3 +7,13 @@ exp/
 test/
 tests/
 artifacts/
+
+# OS / editor
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Go build outputs
+go_entropy_ana
