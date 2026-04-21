@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if REPO_ROOT.as_posix() not in sys.path:
     sys.path.insert(0, REPO_ROOT.as_posix())
 
-from ranking_explain.rarity import RarityStats, save_rarity_stats  # noqa: E402
+from ranking_explain.rarity import RarityStats, normalize_dst_key, save_rarity_stats  # noqa: E402
 
 
 EType = Tuple[str, str, str]
@@ -53,6 +53,12 @@ def main() -> None:
     ap.add_argument("--out", type=str, default="artifacts/stats/benign_rarity_stats.json")
     ap.add_argument("--label", type=int, default=0, help="Label treated as benign (default: 0)")
     ap.add_argument("--limit", type=int, default=0, help="If >0, cap number of benign graphs")
+    ap.add_argument(
+        "--normalize",
+        type=str,
+        default="none",
+        help="Dst-key normalization scheme: none|osp|qut (reduces long-tail uniqueness, recommended for OSP)",
+    )
     args = ap.parse_args()
 
     graph_paths: list[Path] = []
@@ -82,7 +88,9 @@ def main() -> None:
                 continue
             dst = edge_index[1].tolist()
             for dst_local in dst:
-                k = (etype, dst_key_for(data, dst_type, int(dst_local)))
+                raw = dst_key_for(data, dst_type, int(dst_local))
+                norm = normalize_dst_key(scheme=str(args.normalize), etype=etype, dst_type=dst_type, dst_key=raw)
+                k = (etype, norm)
                 seen.add(k)
         for k in seen:
             df[k] += 1
@@ -90,7 +98,7 @@ def main() -> None:
         if args.limit > 0 and num >= int(args.limit):
             break
 
-    stats = RarityStats(num_graphs=num, df=dict(df))
+    stats = RarityStats(num_graphs=num, df=dict(df), normalize=str(args.normalize))
     save_rarity_stats(args.out, stats)
     print(f"out={args.out} benign_graphs={num} unique_pairs={len(stats.df)}")
 

@@ -147,7 +147,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=str, default="artifacts/qut_canonical")
     ap.add_argument("--package-name", type=str, default="")
-    ap.add_argument("--limit-packages", type=int, default=50)
+    ap.add_argument("--limit-packages", type=int, default=50, help="Max packages to process (0 = all packages)")
     ap.add_argument(
         "--kinds",
         type=str,
@@ -169,7 +169,11 @@ def main() -> None:
     else:
         # Use the install table as the package universe if available, otherwise first table.
         base_kind = "install" if "install" in tables else kinds[0]
-        pkg_names = tables[base_kind]["Package_Name"].dropna().astype(str).unique().tolist()[: args.limit_packages]
+        all_names = tables[base_kind]["Package_Name"].dropna().astype(str).unique().tolist()
+        if args.limit_packages <= 0:
+            pkg_names = all_names
+        else:
+            pkg_names = all_names[: int(args.limit_packages)]
 
     # Try optional graph build; always save JSON.
     have_graph = False

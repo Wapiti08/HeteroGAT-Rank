@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 from torch_geometric.data import HeteroData
+import random
 
 # Ensure repo root importable when running as script.
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -15,7 +16,7 @@ if REPO_ROOT.as_posix() not in sys.path:
 from model.rgcn import RGCNGraphClassifier  # noqa: E402
 from ranking_explain.pgexplainer import PGExplainer  # noqa: E402
 from ranking_explain.hunt import RankedEdge, topk_edges  # noqa: E402
-from ranking_explain.rarity import load_rarity_stats  # noqa: E402
+from ranking_explain.rarity import etype_to_str, load_rarity_stats, normalize_dst_key, str_to_etype  # noqa: E402
 
 
 def load_one_graph(path: Path) -> HeteroData:
@@ -156,8 +157,27 @@ def main() -> None:
     ap.add_argument("--backbone-ckpt", type=str, default="", help="Backbone checkpoint (.pt)")
     ap.add_argument("--explainer-ckpt", type=str, default="", help="Explainer checkpoint (.pt)")
     ap.add_argument("--device", type=str, default="cpu", help="cpu|cuda")
+    ap.add_argument("--seed", type=int, default=0, help="Random seed for reproducible ranking (0 = no seeding)")
     ap.add_argument("--rarity-stats", type=str, default="", help="Path to benign rarity stats json (build_benign_rarity_stats.py)")
     ap.add_argument("--rarity-lambda", type=float, default=0.0, help="Add lambda * idf(etype,dst_key) to edge score")
+    ap.add_argument(
+        "--rarity-normalize",
+        type=str,
+        default="",
+        help="Override rarity dst_key normalization (none|osp|qut). Default: use stats' normalize field.",
+    )
+    ap.add_argument(
+        "--rarity-idf-cap",
+        type=float,
+        default=0.0,
+        help="If >0, cap IDF to this value before scaling by lambda (helps OSP long-tail).",
+    )
+    ap.add_argument(
+        "--rarity-etypes",
+        type=str,
+        default="",
+        help="Comma-separated etypes to apply rarity to (format SRC|REL|DST). Empty = all etypes.",
+    )
     ap.add_argument(
         "--print-anomaly-score",
         action="store_true",
@@ -236,6 +256,17 @@ def main() -> None:
     args = ap.parse_args()
 
     p = Path(args.graph)
+    if int(args.seed) != 0:
+        s = int(args.seed)
+        random.seed(s)
+        torch.manual_seed(s)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(s)
+        try:
+            torch.use_deterministic_algorithms(True)
+        except Exception:
+            # Older torch versions may not support this; seeding is still helpful.
+            pass
     data = load_one_graph(p)
     device = torch.device("cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu")
     data = data.to(device)
@@ -253,10 +284,38 @@ def main() -> None:
     ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=max(args.k * 20, args.k))
     if rarity is not None and float(args.rarity_lambda) != 0.0:
         lam = float(args.rarity_lambda)
+        cap = float(args.rarity_idf_cap)
+        scheme = str(args.rarity_normalize).strip() or str(getattr(rarity, "normalize", "none"))
+        allowed = {s.strip() for s in str(args.rarity_etypes).split(",") if s.strip()}
         ranked = [
             RankedEdge(
                 graph_id=r.graph_id,
-                score=float(r.score + lam * rarity.idf(etype=r.etype, dst_key=r.dst_key)),
+                score=float(
+                    r.score
+                    + (
+                        lam
+                        * (
+                            min(
+                                rarity.idf(
+                                    etype=r.etype,
+                                    dst_key=normalize_dst_key(
+                                        scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key)
+                                    ),
+                                ),
+                                cap,
+                            )
+                            if cap > 0.0
+                            else rarity.idf(
+                                etype=r.etype,
+                                dst_key=normalize_dst_key(
+                                    scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key)
+                                ),
+                            )
+                        )
+                        if (not allowed or etype_to_str(r.etype) in allowed)
+                        else 0.0
+                    )
+                ),
                 etype=r.etype,
                 src_type=r.src_type,
                 src_key=r.src_key,

@@ -137,12 +137,12 @@ def _process_one_row(row: Dict[str, Any], outdir: str, have_graph: bool) -> Tupl
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pkl", type=str, default="data/label_data.pkl")
-    ap.add_argument("--csv", type=str, default="data/label_data.csv")
+    ap.add_argument("--pkl", type=str, default="data/OSPTrack/label_data.pkl")
+    ap.add_argument("--csv", type=str, default="data/OSPTrack/label_data.csv")
     ap.add_argument("--prefer-pkl", action="store_true", default=True)
     ap.add_argument("--no-prefer-pkl", action="store_false", dest="prefer_pkl")
     ap.add_argument("--out", type=str, default="artifacts/osptrack_canonical")
-    ap.add_argument("--limit-rows", type=int, default=1000)
+    ap.add_argument("--limit-rows", type=int, default=1000, help="Max rows to process (0 = all rows)")
     ap.add_argument("--chunksize", type=int, default=50_000)
     ap.add_argument("--random-sample", action="store_true", default=False)
     ap.add_argument("--stratify-label", action="store_true", default=False)
@@ -168,17 +168,18 @@ def main() -> None:
         have_graph = False
 
     use_pkl = args.prefer_pkl and pkl_path.exists()
+    limit_rows = None if args.limit_rows <= 0 else int(args.limit_rows)
     if use_pkl:
         if args.stratify_label:
             if args.per_class <= 0:
                 raise ValueError("--per-class must be > 0 when --stratify-label is set")
             row_iter = iter_pkl_rows_stratified(pkl_path, per_class=args.per_class, seed=args.seed)
         else:
-            row_iter = iter_pkl_rows(pkl_path, limit=args.limit_rows, random_sample=args.random_sample, seed=args.seed)
+            row_iter = iter_pkl_rows(pkl_path, limit=limit_rows, random_sample=args.random_sample, seed=args.seed)
     else:
         if args.stratify_label:
             raise ValueError("--stratify-label requires --prefer-pkl (CSV streaming stratification is unsupported)")
-        row_iter = iter_csv_rows(csv_path, chunksize=args.chunksize, limit=args.limit_rows)
+        row_iter = iter_csv_rows(csv_path, chunksize=args.chunksize, limit=limit_rows)
 
     workers = args.workers
     if workers <= 0:
