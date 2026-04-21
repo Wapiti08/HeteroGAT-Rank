@@ -292,8 +292,21 @@ def main() -> None:
     print(f"eval_n={len(y)} pos={int((y==1).sum())} neg={int((y==0).sum())}")
 
     print("\n== anomaly_score (mean top-k) ==")
-    print(f"base_auroc={_safe_auc(y, sb):.4f} base_auprc={_safe_auprc(y, sb):.4f}")
-    print(f"rarity_auroc={_safe_auc(y, sr):.4f} rarity_auprc={_safe_auprc(y, sr):.4f}")
+    # Depending on how the explainer score is calibrated, higher may mean "more normal"
+    # (e.g., stable/install-like patterns) rather than "more anomalous". Report both
+    # directions so users can pick the correct orientation.
+    base_auc = _safe_auc(y, sb)
+    base_auc_inv = _safe_auc(y, -sb)
+    base_auprc = _safe_auprc(y, sb)
+    base_auprc_inv = _safe_auprc(y, -sb)
+
+    rar_auc = _safe_auc(y, sr)
+    rar_auc_inv = _safe_auc(y, -sr)
+    rar_auprc = _safe_auprc(y, sr)
+    rar_auprc_inv = _safe_auprc(y, -sr)
+
+    print(f"base_auroc={base_auc:.4f} base_auprc={base_auprc:.4f} | inverted: auroc={base_auc_inv:.4f} auprc={base_auprc_inv:.4f}")
+    print(f"rarity_auroc={rar_auc:.4f} rarity_auprc={rar_auprc:.4f} | inverted: auroc={rar_auc_inv:.4f} auprc={rar_auprc_inv:.4f}")
 
     ks = [int(x) for x in str(args.ks).split(",") if x.strip()]
     print("\n== graph-level ranking (by anomaly_score) ==")
@@ -301,6 +314,12 @@ def main() -> None:
         print(f"base P@{k}={p:.4f} R@{k}={r:.4f}")
     for k, p, r in _precision_recall_at_k(y, sr, ks):
         print(f"rarity P@{k}={p:.4f} R@{k}={r:.4f}")
+
+    print("\n== graph-level ranking (by inverted anomaly_score) ==")
+    for k, p, r in _precision_recall_at_k(y, -sb, ks):
+        print(f"base(inv) P@{k}={p:.4f} R@{k}={r:.4f}")
+    for k, p, r in _precision_recall_at_k(y, -sr, ks):
+        print(f"rarity(inv) P@{k}={p:.4f} R@{k}={r:.4f}")
 
 
 if __name__ == "__main__":

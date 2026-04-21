@@ -247,6 +247,37 @@ python comp/gnn_baselines/train_rgcn.py \
   --save-ckpt artifacts/checkpoints/rgcn_qut_full.pt
 ```
 
+Other canonical-graph GNN backbones (for paper baselines):
+
+```bash
+# GAT (homogeneous view with node_type/edge_type embeddings)
+python comp/gnn_baselines/train_gat.py \
+  --graphs artifacts/qut_all \
+  --train-list splits_full/qut_train.txt \
+  --test-list splits_full/qut_test.txt \
+  --epochs 5 --batch-size 8 \
+  --ks 10,50,100 \
+  --save-ckpt artifacts/checkpoints/gat_qut_full.pt
+
+# HAN (heterogeneous)
+python comp/gnn_baselines/train_han.py \
+  --graphs artifacts/qut_all \
+  --train-list splits_full/qut_train.txt \
+  --test-list splits_full/qut_test.txt \
+  --epochs 5 --batch-size 8 \
+  --ks 10,50,100 \
+  --save-ckpt artifacts/checkpoints/han_qut_full.pt
+
+# HGT (heterogeneous)
+python comp/gnn_baselines/train_hgt.py \
+  --graphs artifacts/qut_all \
+  --train-list splits_full/qut_train.txt \
+  --test-list splits_full/qut_test.txt \
+  --epochs 5 --batch-size 8 \
+  --ks 10,50,100 \
+  --save-ckpt artifacts/checkpoints/hgt_qut_full.pt
+```
+
 Note: `train_rgcn.py` only saves the backbone. To produce explanations you also need a PGExplainer checkpoint:
 
 ```bash
