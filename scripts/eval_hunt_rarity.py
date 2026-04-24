@@ -241,6 +241,8 @@ def main() -> None:
     y_true: list[int] = []
     score_base: list[float] = []
     score_rarity: list[float] = []
+    node_counts: list[int] = []
+    edge_counts: list[int] = []
 
     with torch.no_grad():
         for gp in graph_paths:
@@ -249,6 +251,22 @@ def main() -> None:
                 continue
 
             data = _load_graph(gp).to(device)
+
+            # Graph size stats (sum over node/edge types).
+            n_nodes = 0
+            for nt in data.node_types:
+                try:
+                    n_nodes += int(data[nt].num_nodes or 0)
+                except Exception:
+                    pass
+            n_edges = 0
+            for et in data.edge_types:
+                try:
+                    ei = data[et].edge_index
+                    if ei is not None:
+                        n_edges += int(ei.size(1))
+                except Exception:
+                    pass
 
             ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=max(int(cfg.k) * 20, int(cfg.k)))
             ranked = _filter_ranked_edges(
@@ -281,6 +299,8 @@ def main() -> None:
             y_true.append(int(y))
             score_base.append(float(base))
             score_rarity.append(float(rar))
+            node_counts.append(int(n_nodes))
+            edge_counts.append(int(n_edges))
 
     if not y_true:
         raise SystemExit("No labeled graphs found (y in {0,1})")
@@ -288,8 +308,17 @@ def main() -> None:
     y = np.asarray(y_true, dtype=int)
     sb = np.asarray(score_base, dtype=float)
     sr = np.asarray(score_rarity, dtype=float)
+    nc = np.asarray(node_counts, dtype=float)
+    ec = np.asarray(edge_counts, dtype=float)
 
     print(f"eval_n={len(y)} pos={int((y==1).sum())} neg={int((y==0).sum())}")
+    if len(nc) > 0:
+        def q(arr, p):
+            return float(np.quantile(arr, p))
+        print(
+            f"graph_size: nodes mean={float(nc.mean()):.1f} median={q(nc,0.5):.1f} p90={q(nc,0.9):.1f} | "
+            f"edges mean={float(ec.mean()):.1f} median={q(ec,0.5):.1f} p90={q(ec,0.9):.1f}"
+        )
 
     print("\n== anomaly_score (mean top-k) ==")
     # Depending on how the explainer score is calibrated, higher may mean "more normal"

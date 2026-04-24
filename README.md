@@ -294,7 +294,10 @@ python ranking_explain/train_pgexplainer.py \
 This evaluates the graph-level anomaly score computed from top-K explanation edges,
 and compares **base** vs **rarity-adjusted** scores.
 
-```bash
+
+- full scale data evaluation with latency
+```
+# for qut data
 python scripts/eval_hunt_rarity.py \
   --test-list splits_full/qut_test.txt \
   --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt \
@@ -303,8 +306,25 @@ python scripts/eval_hunt_rarity.py \
   --k 20 \
   --ks 10,50,100 \
   --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
-  --dedup-dst --max-per-etype 8
+  --dedup-dst --max-per-etype 8 \
+  --latency-out artifacts/latency/qut_eval_hunt_rarity.json
+
+# for osp data
+python scripts/eval_hunt_rarity.py \
+  --test-list splits_full/osp_test.txt \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json \
+  --k 20 \
+  --ks 10,50,100 \
+  --filter-net --filter-net-ip \
+  --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
+  --dedup-dst --max-per-etype 8 \
+  --latency-out artifacts/latency/osp_eval_hunt_rarity.json
+
 ```
+
+- for specific package hunting
 
 ```
 
@@ -340,11 +360,27 @@ python -m ranking_explain.run_hunt \
 
 # ================ for QUT_DV25 =================
 
-
-
-
+## change osp to qut
 
 ```
+
+## Ablation Study
+
+```
+# for qut data
+python scripts/ablate_rarity_qut.py \
+  --test-list splits_full/qut_test.txt \
+  --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_qut_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json \
+  --k 20 --ks 10,50,100 \
+  --rarity-lambdas 0,0.1,0.3,0.5,1.0 \
+  --rarity-idf-caps 0,1,2,3,5 \
+  --rarity-etypes-grid "PROC|CONNECT|NET,PROC|EXEC|CMD;PROC|CONNECT|NET;PROC|EXEC|CMD;" \
+  --out-csv artifacts/rarity_ablation_qut.csv
+```
+
+
 
 ## Distributed Configuration
 

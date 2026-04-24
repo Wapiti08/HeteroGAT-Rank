@@ -127,6 +127,7 @@ def _apply_calibrator(cal, s: np.ndarray, mode: Calib) -> np.ndarray:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scores", type=str, required=True, help="CSV with columns: split,y,score (optionally other columns)")
+    ap.add_argument("--model", type=str, default="", help="Optional: filter rows by df['model']==MODEL (requires 'model' column)")
     ap.add_argument("--split-col", type=str, default="split")
     ap.add_argument("--y-col", type=str, default="y")
     ap.add_argument("--score-col", type=str, default="score")
@@ -142,6 +143,12 @@ def main() -> None:
     for c in (args.split_col, args.y_col, args.score_col):
         if c not in df.columns:
             raise KeyError(f"Missing column {c} in {args.scores}")
+    if args.model:
+        if "model" not in df.columns:
+            raise KeyError("Missing column 'model' in scores CSV; cannot use --model")
+        df = df[df["model"].astype(str) == str(args.model)].copy()
+        if df.empty:
+            raise SystemExit(f"No rows left after --model {args.model} filter")
 
     dval = df[df[args.split_col].astype(str) == str(args.val_split)].copy()
     dtest = df[df[args.split_col].astype(str) == str(args.test_split)].copy()
