@@ -1,0 +1,104 @@
+{
+  "n": 2570,
+  "total_ms": 774835.7044495642,
+  "mean_ms": 301.4924920037215,
+  "p50_ms": 215.65937623381615,
+  "p90_ms": 459.4574562273919,
+  "p95_ms": 708.6944053415205,
+  "p99_ms": 1635.2784045319995,
+  "max_ms": 4564.627539366484,
+  "graph_size": {
+    "nodes": {
+      "mean": 69.58365758754864,
+      "p50": 75.0,
+      "p90": 82.0
+    },
+    "edges": {
+      "mean": 81.04902723735408,
+      "p50": 86.0,
+      "p90": 94.0
+    }
+  },
+  "slowest": [
+    {
+      "graph": "randomrandom-1.68.tar.gz.graph.pt",
+      "ms": 4564.627539366484
+    },
+    {
+      "graph": "cryptofed-0.1.tar.gz.graph.pt",
+      "ms": 3281.8147195503116
+    },
+    {
+      "graph": "pointpp.graph.pt",
+      "ms": 2816.6099367663264
+    },
+    {
+      "graph": "hackermind.graph.pt",
+      "ms": 2794.0352903679013
+    },
+    {
+      "graph": "habibisus-0.0.0.tar.gz.graph.pt",
+      "ms": 2438.6796383187175
+    },
+    {
+      "graph": "wxpayproto-1.3.1.tar.gz.graph.pt",
+      "ms": 2375.492513179779
+    },
+    {
+      "graph": "py-cordf-1.0.0.tar.gz.graph.pt",
+      "ms": 2285.223037004471
+    },
+    {
+      "graph": "lyft-core-999.3.9.tar.gz.graph.pt",
+      "ms": 2175.0890472903848
+    },
+    {
+      "graph": "maplotlib-0.1.tar.gz.graph.pt",
+      "ms": 2156.7658418789506
+    },
+    {
+      "graph": "esqvirtualgame-2.26.tar.gz.graph.pt",
+      "ms": 2100.6598556414247
+    },
+    {
+      "graph": "pypipe-ppp.graph.pt",
+      "ms": 2078.2316718250513
+    },
+    {
+      "graph": "pysockss-0.1.tar.gz.graph.pt",
+      "ms": 2058.4671571850777
+    },
+    {
+      "graph": "downloader.graph.pt",
+      "ms": 2040.559310466051
+    },
+    {
+      "graph": "pycodesttyle-0.1.tar.gz.graph.pt",
+      "ms": 2034.1595569625497
+    },
+    {
+      "graph": "pushpad.graph.pt",
+      "ms": 2013.1525192409754
+    },
+    {
+      "graph": "solnaa-0.1.tar.gz.graph.pt",
+      "ms": 2003.0160006135702
+    },
+    {
+      "graph": "marshmallow.graph.pt",
+      "ms": 1936.1728895455599
+    },
+    {
+      "graph": "playwrigth-1.0.0.tar.gz.graph.pt",
+      "ms": 1893.9226968213916
+    },
+    {
+      "graph": "multiconnects-2.34.11.tar.gz.graph.pt",
+      "ms": 1844.1798780113459
+    },
+    {
+      "graph": "tested.graph.pt",
+      "ms": 1811.3360535353422
+    }
+  ]
+}

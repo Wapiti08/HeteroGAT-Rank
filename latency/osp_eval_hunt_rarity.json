@@ -1,0 +1,104 @@
+{
+  "n": 1261,
+  "total_ms": 7152309.631093405,
+  "mean_ms": 5671.934679693422,
+  "p50_ms": 5531.419448554516,
+  "p90_ms": 6103.636870160699,
+  "p95_ms": 6471.595746465027,
+  "p99_ms": 7698.173667117968,
+  "max_ms": 10745.52448373288,
+  "graph_size": {
+    "nodes": {
+      "mean": 3643.900872323553,
+      "p50": 1597.0,
+      "p90": 9586.0
+    },
+    "edges": {
+      "mean": 6830.555908009516,
+      "p50": 1929.0,
+      "p90": 18300.0
+    }
+  },
+  "slowest": [
+    {
+      "graph": "npm::gallery-with-magnifier@0.4.0.graph.pt",
+      "ms": 10745.52448373288
+    },
+    {
+      "graph": "npm::@coveo_atomic-angular@2.18.1-pre.0f5c40974f.graph.pt",
+      "ms": 9227.736462838948
+    },
+    {
+      "graph": "npm::@things-factory_operato-mms@6.1.100.graph.pt",
+      "ms": 9149.67596810311
+    },
+    {
+      "graph": "npm::storybook-nuxt@7.4.0-alpha.0.5.graph.pt",
+      "ms": 9076.613566838205
+    },
+    {
+      "graph": "npm::@hapchain-nft_hooks@0.0.36.graph.pt",
+      "ms": 8903.936848044395
+    },
+    {
+      "graph": "npm::@capwise_core2@300.0.184.graph.pt",
+      "ms": 8901.068100705743
+    },
+    {
+      "graph": "npm::@questwork_q-store@0.1.28.graph.pt",
+      "ms": 8421.269139274955
+    },
+    {
+      "graph": "npm::egenie-common@2.0.22.graph.pt",
+      "ms": 8211.713528260589
+    },
+    {
+      "graph": "pypi::benchmark-runner@1.0.350.graph.pt",
+      "ms": 8071.65012974292
+    },
+    {
+      "graph": "npm::@edx_frontend-platform@5.1.0.graph.pt",
+      "ms": 8056.5219055861235
+    },
+    {
+      "graph": "npm::@roxavn_module-asset@0.1.1.graph.pt",
+      "ms": 7872.998151928186
+    },
+    {
+      "graph": "npm::@things-factory_screencast-proxy-service@6.1.100.graph.pt",
+      "ms": 7815.953040495515
+    },
+    {
+      "graph": "npm::eli-video-interview@1.2.3-5.alpha.16.graph.pt",
+      "ms": 7793.920438736677
+    },
+    {
+      "graph": "npm::@things-factory_export-ui-csv@6.1.100.graph.pt",
+      "ms": 7634.342486038804
+    },
+    {
+      "graph": "npm::norma-library@0.2.4.graph.pt",
+      "ms": 7589.435187168419
+    },
+    {
+      "graph": "crates.io::minigrep_elijahkx@0.1.2.graph.pt",
+      "ms": 7545.958718284965
+    },
+    {
+      "graph": "pypi::timewise-sup@0.4.5.graph.pt",
+      "ms": 7514.542752876878
+    },
+    {
+      "graph": "npm::react-jovan-calendar@0.0.24.graph.pt",
+      "ms": 7453.703037463129
+    },
+    {
+      "graph": "npm::@webiny_api-form-builder-so-ddb@5.39.0-beta.0.graph.pt",
+      "ms": 7442.104261368513
+    },
+    {
+      "graph": "npm::@knapsack_update@4.20.0--canary.2820.643247e.0.graph.pt",
+      "ms": 7345.382790081203
+    }
+  ]
+}
