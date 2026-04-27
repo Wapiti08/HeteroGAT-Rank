@@ -18,6 +18,37 @@ if REPO_ROOT.as_posix() not in sys.path:
 from config.osptrack_canonical import extract_events, pkg_key  # noqa: E402
 
 
+def _read_list(path: str | None) -> list[str]:
+    if not path:
+        return []
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(p.as_posix())
+    return [ln.strip() for ln in p.read_text().splitlines() if ln.strip()]
+
+
+def _read_csv_or_list(value: str | None, list_path: str | None) -> list[str]:
+    items: list[str] = []
+    if value:
+        items.extend(x.strip() for x in str(value).split(",") if x.strip())
+    items.extend(_read_list(list_path))
+    return items
+
+
+def _matches_package(row: Dict[str, Any], packages: set[str]) -> bool:
+    if not packages:
+        return True
+    name = str(row.get("Name", "")).strip().lower()
+    key = pkg_key(row).strip().lower()
+    return name in packages or key in packages
+
+
+def _filter_rows(rows: Iterator[Dict[str, Any]], packages: set[str]) -> Iterator[Dict[str, Any]]:
+    for row in rows:
+        if _matches_package(row, packages):
+            yield row
+
+
 def iter_csv_rows(path: Path, *, chunksize: int = 50_000, limit: Optional[int] = None) -> Iterator[Dict[str, Any]]:
     seen = 0
     for chunk in pd.read_csv(path, chunksize=chunksize):
@@ -149,6 +180,18 @@ def main() -> None:
     ap.add_argument("--per-class", type=int, default=0, help="If --stratify-label, sample this many per label")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--workers", type=int, default=0, help="Parallel workers (0=auto, 1=disable)")
+    ap.add_argument(
+        "--include-packages",
+        type=str,
+        default="",
+        help="Comma-separated package names or Ecosystem::Name@Version keys to generate",
+    )
+    ap.add_argument(
+        "--include-package-list",
+        type=str,
+        default="",
+        help="File with one package name or Ecosystem::Name@Version key per line to generate",
+    )
     args = ap.parse_args()
 
     pkl_path = Path(args.pkl)
@@ -180,6 +223,9 @@ def main() -> None:
         if args.stratify_label:
             raise ValueError("--stratify-label requires --prefer-pkl (CSV streaming stratification is unsupported)")
         row_iter = iter_csv_rows(csv_path, chunksize=args.chunksize, limit=limit_rows)
+
+    include_packages = {p.lower() for p in _read_csv_or_list(args.include_packages, args.include_package_list)}
+    row_iter = _filter_rows(row_iter, include_packages)
 
     workers = args.workers
     if workers <= 0:

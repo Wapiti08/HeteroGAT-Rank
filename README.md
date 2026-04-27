@@ -289,10 +289,15 @@ python ranking_explain/train_pgexplainer.py \
   --save-ckpt artifacts/checkpoints/pgexp_qut_full.pt
 ```
 
-#### 2) Hunt/Rarity: anomaly-score ranking metrics (AUROC/AUPRC + P@K/R@K)
+#### 2) Hunt/Rarity: suspicious-score ranking metrics (AUROC/AUPRC + P@K/R@K)
 
-This evaluates the graph-level anomaly score computed from top-K explanation edges,
-and compares **base** vs **rarity-adjusted** scores.
+This evaluates the graph-level suspicious score computed from top-K suspicious
+edges, and compares **base** vs **rarity-adjusted** scores. Higher
+`suspicious_score` means more suspicious:
+
+```text
+suspicious_score = mean_topk(-explainer_keep_score + lambda * benign_idf)
+```
 
 
 - full scale data evaluation with latency
@@ -307,6 +312,10 @@ python scripts/eval_hunt_rarity.py \
   --ks 10,50,100 \
   --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
   --dedup-dst --max-per-etype 8 \
+  --rarity-normalize qut \
+  --rarity-etypes "" \
+  --rarity-idf-cap 0 \
+  --rarity-lambda 0.5 \
   --latency-out artifacts/latency/qut_eval_hunt_rarity.json
 
 # for osp data
@@ -315,13 +324,15 @@ python scripts/eval_hunt_rarity.py \
   --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt \
   --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt \
   --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json \
-  --k 20 \
-  --ks 10,50,100 \
+  --rarity-normalize osp \
+  --rarity-etypes "" \
+  --rarity-idf-cap 5 \
+  --rarity-lambda 0.5 \
+  --k 20 --ks 10,50,100 \
   --filter-net --filter-net-ip \
   --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
   --dedup-dst --max-per-etype 8 \
   --latency-out artifacts/latency/osp_eval_hunt_rarity.json
-
 ```
 
 - for specific package hunting
@@ -362,6 +373,64 @@ python -m ranking_explain.run_hunt \
 
 ## change osp to qut
 
+```
+
+## Case Studies
+
+Generate auto-selected malicious case studies ranked by the unified
+`suspicious_score`:
+
+```
+# for qut data
+python scripts/generate_case_studies.py \
+  --test-list splits_full/qut_test.txt \
+  --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_qut_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json \
+  --out artifacts/case_studies_qut.md \
+  --k 20 --k-show 12 --topn 3 \
+  --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
+  --dedup-dst --max-per-etype 8
+
+# report-backed QUT cases for reliability mapping
+python scripts/generate_case_studies.py \
+  --test-list splits_full/qut_test.txt \
+  --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_qut_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json \
+  --out artifacts/case_studies_qut_reported.md \
+  --k 20 --k-show 12 --topn 3 \
+  --extra-graphs "artifacts/qut_a/10Cent10-999.0.4.tar.gz.graph.pt,artifacts/qut_a/10Cent11-999.0.4.tar.gz.graph.pt" \
+  --include-packages "10Cent10,10Cent11" \
+  --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
+  --dedup-dst --max-per-etype 8
+
+# for osp data
+python scripts/generate_case_studies.py \
+  --test-list splits_full/osp_test.txt \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json \
+  --out artifacts/case_studies_osp.md \
+  --k 20 --k-show 12 --topn 3 \
+  --filter-net --filter-net-ip \
+  --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
+  --dedup-dst --max-per-etype 8
+
+
+# for osptrack dataset
+python scripts/generate_case_studies.py \
+  --test-list splits_full/osp_test.txt \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json \
+  --out artifacts/case_studies_osp_reported.md \
+  --k 20 --k-show 12 --topn 8 \
+  --extra-graphs "artifacts/osp_all/pypi::capmonstercloudclent@1.0.0.graph.pt,artifacts/osp_all/pypi::capmonstercloudclinent@1.0.0.graph.pt,artifacts/osp_all/pypi::capmonstercloudclieent@1.0.0.graph.pt,artifacts/osp_all/pypi::capmonstercloudclinet@1.0.0.graph.pt,artifacts/osp_all/pypi::capmonstercloudclouidclient@1.0.0.graph.pt,artifacts/osp_all/pypi::capmonsstercloudclient@1.0.0.graph.pt,artifacts/osp_all/pypi::ligitgays@1.0.graph.pt,artifacts/osp_all/pypi::bettercolors@0.1.1.graph.pt" \
+  --include-packages "capmonstercloudclent,capmonstercloudclinent,capmonstercloudclieent,capmonstercloudclinet,capmonstercloudclouidclient,capmonsstercloudclient,ligitgays,bettercolors" \
+  --filter-net \
+  --filter-system-files --filter-tmp-tempfile --filter-cmd-noise \
+  --dedup-dst --max-per-etype 8
 ```
 
 ## Ablation Study

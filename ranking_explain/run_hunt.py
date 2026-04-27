@@ -159,7 +159,7 @@ def main() -> None:
     ap.add_argument("--device", type=str, default="cpu", help="cpu|cuda")
     ap.add_argument("--seed", type=int, default=0, help="Random seed for reproducible ranking (0 = no seeding)")
     ap.add_argument("--rarity-stats", type=str, default="", help="Path to benign rarity stats json (build_benign_rarity_stats.py)")
-    ap.add_argument("--rarity-lambda", type=float, default=0.0, help="Add lambda * idf(etype,dst_key) to edge score")
+    ap.add_argument("--rarity-lambda", type=float, default=0.0, help="Add lambda * idf(etype,dst_key) to suspicious score")
     ap.add_argument(
         "--rarity-normalize",
         type=str,
@@ -180,9 +180,17 @@ def main() -> None:
     )
     ap.add_argument(
         "--print-anomaly-score",
+        dest="print_suspicious_score",
         action="store_true",
         default=False,
-        help="Print graph-level anomaly score (mean of top-K adjusted edge scores)",
+        help="Deprecated alias for --print-suspicious-score",
+    )
+    ap.add_argument(
+        "--print-suspicious-score",
+        dest="print_suspicious_score",
+        action="store_true",
+        default=False,
+        help="Print graph-level suspicious score (mean of top-K suspicious edge scores)",
     )
     ap.add_argument("--filter-net", action="store_true", default=False, help="Filter common NET noise (domains)")
     ap.add_argument("--filter-net-ip", action="store_true", default=False, help="Filter NET:ip::* destinations (keep dns/host)")
@@ -280,51 +288,34 @@ def main() -> None:
 
     rarity = load_rarity_stats(args.rarity_stats) if args.rarity_stats else None
 
-    # Pull a larger candidate set, then filter down to k.
-    ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=max(args.k * 20, args.k))
-    if rarity is not None and float(args.rarity_lambda) != 0.0:
-        lam = float(args.rarity_lambda)
-        cap = float(args.rarity_idf_cap)
-        scheme = str(args.rarity_normalize).strip() or str(getattr(rarity, "normalize", "none"))
-        allowed = {s.strip() for s in str(args.rarity_etypes).split(",") if s.strip()}
-        ranked = [
+    # Score all candidate edges: low PGExplainer keep score is suspicious, and
+    # benign-IDF rarity increases suspiciousness.
+    ranked_raw = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=1_000_000)
+    lam = float(args.rarity_lambda)
+    cap = float(args.rarity_idf_cap)
+    scheme = str(args.rarity_normalize).strip() or str(getattr(rarity, "normalize", "none"))
+    allowed = {s.strip() for s in str(args.rarity_etypes).split(",") if s.strip()}
+    ranked = []
+    for r in ranked_raw:
+        bonus = 0.0
+        if rarity is not None and lam != 0.0 and (not allowed or etype_to_str(r.etype) in allowed):
+            norm_key = normalize_dst_key(scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key))
+            idf = float(rarity.idf(etype=r.etype, dst_key=norm_key))
+            if cap > 0.0:
+                idf = min(idf, cap)
+            bonus = lam * idf
+        ranked.append(
             RankedEdge(
                 graph_id=r.graph_id,
-                score=float(
-                    r.score
-                    + (
-                        lam
-                        * (
-                            min(
-                                rarity.idf(
-                                    etype=r.etype,
-                                    dst_key=normalize_dst_key(
-                                        scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key)
-                                    ),
-                                ),
-                                cap,
-                            )
-                            if cap > 0.0
-                            else rarity.idf(
-                                etype=r.etype,
-                                dst_key=normalize_dst_key(
-                                    scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key)
-                                ),
-                            )
-                        )
-                        if (not allowed or etype_to_str(r.etype) in allowed)
-                        else 0.0
-                    )
-                ),
+                score=float(-r.score + bonus),
                 etype=r.etype,
                 src_type=r.src_type,
                 src_key=r.src_key,
                 dst_type=r.dst_type,
                 dst_key=r.dst_key,
             )
-            for r in ranked
-        ]
-        ranked.sort(key=lambda x: x.score, reverse=True)
+        )
+    ranked.sort(key=lambda x: x.score, reverse=True)
     ranked = _filter_ranked_edges(
         ranked,
         filter_net=bool(args.filter_net),
@@ -354,10 +345,9 @@ def main() -> None:
     ranked = ranked[: args.k]
 
     print(f"graph={p.name} topk={len(ranked)}")
-    if args.print_anomaly_score and ranked:
-        # A simple, calibrated-by-benign baseline: mean of top-K adjusted scores.
-        anom = sum(r.score for r in ranked) / float(len(ranked))
-        print(f"anomaly_score={anom:.6f} (mean_topk_adjusted)")
+    if args.print_suspicious_score and ranked:
+        suspicious = sum(r.score for r in ranked) / float(len(ranked))
+        print(f"suspicious_score={suspicious:.6f} (mean_topk_suspicious)")
     for r in ranked:
         print(f"{r.score:.4f}\t{r.etype}\t{r.src_type}:{r.src_key} -> {r.dst_type}:{r.dst_key}")
 

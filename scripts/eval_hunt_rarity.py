@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
@@ -20,7 +22,7 @@ if REPO_ROOT.as_posix() not in sys.path:
 from model.rgcn import RGCNGraphClassifier  # noqa: E402
 from ranking_explain.hunt import RankedEdge, topk_edges  # noqa: E402
 from ranking_explain.pgexplainer import PGExplainer  # noqa: E402
-from ranking_explain.rarity import etype_to_str, load_rarity_stats, normalize_dst_key  # noqa: E402
+from ranking_explain.rarity import RarityStats, etype_to_str, load_rarity_stats, normalize_dst_key  # noqa: E402
 from ranking_explain.run_hunt import _filter_ranked_edges  # noqa: E402
 
 EType = Tuple[str, str, str]
@@ -103,7 +105,7 @@ class HuntConfig:
     max_per_etype: int
 
 
-def _anomaly_score_from_ranked(ranked: list[RankedEdge], *, k: int) -> float:
+def _mean_topk_score(ranked: list[RankedEdge], *, k: int) -> float:
     if not ranked:
         return float("nan")
     kk = min(int(k), len(ranked))
@@ -112,33 +114,58 @@ def _anomaly_score_from_ranked(ranked: list[RankedEdge], *, k: int) -> float:
     return float(sum(r.score for r in ranked[:kk]) / float(kk))
 
 
-def _apply_rarity(
-    ranked: list[RankedEdge],
+def _rarity_bonus(
+    r: RankedEdge,
     *,
-    rarity_stats_path: str,
+    rarity: Optional[RarityStats],
     rarity_lambda: float,
     rarity_idf_cap: float,
     rarity_etypes: Set[str],
     rarity_normalize: str,
-) -> list[RankedEdge]:
-    rarity = load_rarity_stats(rarity_stats_path)
+) -> float:
+    if rarity is None or float(rarity_lambda) == 0.0:
+        return 0.0
+    if rarity_etypes and etype_to_str(r.etype) not in rarity_etypes:
+        return 0.0
+
     scheme = rarity_normalize.strip() or str(getattr(rarity, "normalize", "none"))
-    lam = float(rarity_lambda)
-    cap = float(rarity_idf_cap)
+    norm_key = normalize_dst_key(scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key))
+    idf = float(rarity.idf(etype=r.etype, dst_key=norm_key))
+    if float(rarity_idf_cap) > 0.0:
+        idf = min(idf, float(rarity_idf_cap))
+    return float(rarity_lambda) * idf
+
+
+def _to_suspicious_edges(
+    ranked: list[RankedEdge],
+    *,
+    rarity: Optional[RarityStats] = None,
+    rarity_lambda: float = 0.0,
+    rarity_idf_cap: float = 0.0,
+    rarity_etypes: Optional[Set[str]] = None,
+    rarity_normalize: str = "",
+) -> list[RankedEdge]:
+    """Convert explainer keep scores into suspicious scores.
+
+    PGExplainer edge scores are treated as normality/keep scores. Lower keep
+    scores are therefore more suspicious, while benign-IDF rarity increases
+    suspiciousness.
+    """
+    etypes = rarity_etypes or set()
     out: list[RankedEdge] = []
     for r in ranked:
-        allow = (not rarity_etypes) or (etype_to_str(r.etype) in rarity_etypes)
-        bonus = 0.0
-        if allow and lam != 0.0:
-            norm_key = normalize_dst_key(scheme=scheme, etype=r.etype, dst_type=r.dst_type, dst_key=str(r.dst_key))
-            idf = float(rarity.idf(etype=r.etype, dst_key=norm_key))
-            if cap > 0.0:
-                idf = min(idf, cap)
-            bonus = lam * idf
+        bonus = _rarity_bonus(
+            r,
+            rarity=rarity,
+            rarity_lambda=rarity_lambda,
+            rarity_idf_cap=rarity_idf_cap,
+            rarity_etypes=etypes,
+            rarity_normalize=rarity_normalize,
+        )
         out.append(
             RankedEdge(
                 graph_id=r.graph_id,
-                score=float(r.score + bonus),
+                score=float(-r.score + bonus),
                 etype=r.etype,
                 src_type=r.src_type,
                 src_key=r.src_key,
@@ -148,6 +175,10 @@ def _apply_rarity(
         )
     out.sort(key=lambda x: x.score, reverse=True)
     return out
+
+
+def _suspicious_score_from_ranked(ranked: list[RankedEdge], *, k: int) -> float:
+    return _mean_topk_score(ranked, k=k)
 
 
 def _as_set_csv(s: str) -> Set[str]:
@@ -181,6 +212,35 @@ def _precision_recall_at_k(y_true: np.ndarray, y_score: np.ndarray, ks: Iterable
     return out
 
 
+def _filter_with_config(ranked: list[RankedEdge], cfg: HuntConfig) -> list[RankedEdge]:
+    return _filter_ranked_edges(
+        ranked,
+        filter_net=cfg.filter_net,
+        filter_net_ip=cfg.filter_net_ip,
+        filter_domains=cfg.filter_domains,
+        filter_system_files=cfg.filter_system_files,
+        system_file_prefixes=cfg.system_file_prefixes,
+        filter_tmp_tempfile=cfg.filter_tmp_tempfile,
+        filter_cmd_noise=cfg.filter_cmd_noise,
+        cmd_noise_keywords=cfg.cmd_noise_keywords,
+        dedup_dst=cfg.dedup_dst,
+        max_per_etype=cfg.max_per_etype,
+    )
+
+
+def _summary_stats(values: Sequence[float]) -> dict[str, float]:
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return {"mean": float("nan"), "median": float("nan"), "p90": float("nan"), "min": float("nan"), "max": float("nan")}
+    return {
+        "mean": float(arr.mean()),
+        "median": float(np.quantile(arr, 0.5)),
+        "p90": float(np.quantile(arr, 0.9)),
+        "min": float(arr.min()),
+        "max": float(arr.max()),
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--graphs", type=str, nargs="+", default=[], help="Graph dirs or files; ignored if --test-list is set")
@@ -190,7 +250,7 @@ def main() -> None:
     ap.add_argument("--device", type=str, default="cpu", help="cpu|cuda")
 
     ap.add_argument("--k", type=int, default=20)
-    ap.add_argument("--ks", type=str, default="10,50,100", help="Graph-level P@K/R@K on anomaly scores")
+    ap.add_argument("--ks", type=str, default="10,50,100", help="Graph-level P@K/R@K on suspicious scores")
 
     # Mirror hunt filters
     ap.add_argument("--filter-net", action="store_true", default=False)
@@ -210,8 +270,10 @@ def main() -> None:
     ap.add_argument("--rarity-idf-cap", type=float, default=3.0)
     ap.add_argument("--rarity-etypes", type=str, default="PROC|CONNECT|NET,PROC|EXEC|CMD")
     ap.add_argument("--rarity-normalize", type=str, default="")
+    ap.add_argument("--latency-out", type=str, default="", help="Optional: write latency and metric summary JSON")
 
     args = ap.parse_args()
+    t_total0 = time.perf_counter()
 
     device = torch.device("cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu")
     backbone = _load_backbone(args.backbone_ckpt, device=device)
@@ -237,15 +299,18 @@ def main() -> None:
     )
 
     rarity_etypes = _as_set_csv(args.rarity_etypes)
+    rarity = load_rarity_stats(str(args.rarity_stats))
 
     y_true: list[int] = []
     score_base: list[float] = []
     score_rarity: list[float] = []
     node_counts: list[int] = []
     edge_counts: list[int] = []
+    graph_latencies: list[float] = []
 
     with torch.no_grad():
         for gp in graph_paths:
+            t_graph0 = time.perf_counter()
             y = _get_y(gp)
             if y is None or int(y) not in (0, 1):
                 continue
@@ -268,39 +333,29 @@ def main() -> None:
                 except Exception:
                     pass
 
-            ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=max(int(cfg.k) * 20, int(cfg.k)))
-            ranked = _filter_ranked_edges(
-                ranked,
-                filter_net=cfg.filter_net,
-                filter_net_ip=cfg.filter_net_ip,
-                filter_domains=cfg.filter_domains,
-                filter_system_files=cfg.filter_system_files,
-                system_file_prefixes=cfg.system_file_prefixes,
-                filter_tmp_tempfile=cfg.filter_tmp_tempfile,
-                filter_cmd_noise=cfg.filter_cmd_noise,
-                cmd_noise_keywords=cfg.cmd_noise_keywords,
-                dedup_dst=cfg.dedup_dst,
-                max_per_etype=cfg.max_per_etype,
-            )
-            ranked.sort(key=lambda r: r.score, reverse=True)
+            ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=1_000_000)
+            base_ranked = _filter_with_config(_to_suspicious_edges(ranked), cfg)
+            base = _suspicious_score_from_ranked(base_ranked, k=cfg.k)
 
-            base = _anomaly_score_from_ranked(ranked, k=cfg.k)
-
-            ranked_r = _apply_rarity(
-                ranked,
-                rarity_stats_path=str(args.rarity_stats),
-                rarity_lambda=float(args.rarity_lambda),
-                rarity_idf_cap=float(args.rarity_idf_cap),
-                rarity_etypes=rarity_etypes,
-                rarity_normalize=str(args.rarity_normalize),
+            ranked_r = _filter_with_config(
+                _to_suspicious_edges(
+                    ranked,
+                    rarity=rarity,
+                    rarity_lambda=float(args.rarity_lambda),
+                    rarity_idf_cap=float(args.rarity_idf_cap),
+                    rarity_etypes=rarity_etypes,
+                    rarity_normalize=str(args.rarity_normalize),
+                ),
+                cfg,
             )
-            rar = _anomaly_score_from_ranked(ranked_r, k=cfg.k)
+            rar = _suspicious_score_from_ranked(ranked_r, k=cfg.k)
 
             y_true.append(int(y))
             score_base.append(float(base))
             score_rarity.append(float(rar))
             node_counts.append(int(n_nodes))
             edge_counts.append(int(n_edges))
+            graph_latencies.append(float(time.perf_counter() - t_graph0))
 
     if not y_true:
         raise SystemExit("No labeled graphs found (y in {0,1})")
@@ -320,35 +375,60 @@ def main() -> None:
             f"edges mean={float(ec.mean()):.1f} median={q(ec,0.5):.1f} p90={q(ec,0.9):.1f}"
         )
 
-    print("\n== anomaly_score (mean top-k) ==")
-    # Depending on how the explainer score is calibrated, higher may mean "more normal"
-    # (e.g., stable/install-like patterns) rather than "more anomalous". Report both
-    # directions so users can pick the correct orientation.
+    print("\n== suspicious_score (mean top-k; higher means more suspicious) ==")
     base_auc = _safe_auc(y, sb)
-    base_auc_inv = _safe_auc(y, -sb)
     base_auprc = _safe_auprc(y, sb)
-    base_auprc_inv = _safe_auprc(y, -sb)
 
     rar_auc = _safe_auc(y, sr)
-    rar_auc_inv = _safe_auc(y, -sr)
     rar_auprc = _safe_auprc(y, sr)
-    rar_auprc_inv = _safe_auprc(y, -sr)
 
-    print(f"base_auroc={base_auc:.4f} base_auprc={base_auprc:.4f} | inverted: auroc={base_auc_inv:.4f} auprc={base_auprc_inv:.4f}")
-    print(f"rarity_auroc={rar_auc:.4f} rarity_auprc={rar_auprc:.4f} | inverted: auroc={rar_auc_inv:.4f} auprc={rar_auprc_inv:.4f}")
+    print(f"base_auroc={base_auc:.4f} base_auprc={base_auprc:.4f}")
+    print(f"rarity_auroc={rar_auc:.4f} rarity_auprc={rar_auprc:.4f}")
 
     ks = [int(x) for x in str(args.ks).split(",") if x.strip()]
-    print("\n== graph-level ranking (by anomaly_score) ==")
+    print("\n== graph-level ranking (by suspicious_score) ==")
+    p_at: dict[str, dict[str, float]] = {"base": {}, "rarity": {}}
+    r_at: dict[str, dict[str, float]] = {"base": {}, "rarity": {}}
     for k, p, r in _precision_recall_at_k(y, sb, ks):
+        p_at["base"][str(k)] = float(p)
+        r_at["base"][str(k)] = float(r)
         print(f"base P@{k}={p:.4f} R@{k}={r:.4f}")
     for k, p, r in _precision_recall_at_k(y, sr, ks):
+        p_at["rarity"][str(k)] = float(p)
+        r_at["rarity"][str(k)] = float(r)
         print(f"rarity P@{k}={p:.4f} R@{k}={r:.4f}")
 
-    print("\n== graph-level ranking (by inverted anomaly_score) ==")
-    for k, p, r in _precision_recall_at_k(y, -sb, ks):
-        print(f"base(inv) P@{k}={p:.4f} R@{k}={r:.4f}")
-    for k, p, r in _precision_recall_at_k(y, -sr, ks):
-        print(f"rarity(inv) P@{k}={p:.4f} R@{k}={r:.4f}")
+    if args.latency_out:
+        out_path = Path(args.latency_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "n_graphs_requested": int(len(graph_paths)),
+            "n_graphs_used": int(len(y)),
+            "device": str(device),
+            "k": int(args.k),
+            "ks": ks,
+            "backbone_ckpt": str(args.backbone_ckpt),
+            "explainer_ckpt": str(args.explainer_ckpt),
+            "rarity_stats": str(args.rarity_stats),
+            "rarity_lambda": float(args.rarity_lambda),
+            "rarity_idf_cap": float(args.rarity_idf_cap),
+            "rarity_etypes": sorted(rarity_etypes),
+            "rarity_normalize": str(args.rarity_normalize),
+            "metrics": {
+                "base_auroc": float(base_auc),
+                "base_auprc": float(base_auprc),
+                "rarity_auroc": float(rar_auc),
+                "rarity_auprc": float(rar_auprc),
+                "p_at_k": p_at,
+                "r_at_k": r_at,
+            },
+            "latency_seconds": {
+                "total": float(time.perf_counter() - t_total0),
+                "per_graph": _summary_stats(graph_latencies),
+            },
+        }
+        out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        print(f"latency_out={out_path.as_posix()}")
 
 
 if __name__ == "__main__":

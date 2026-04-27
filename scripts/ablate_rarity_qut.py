@@ -131,6 +131,22 @@ def _set_seeds(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def _filter_with_config(ranked: list[ehr.RankedEdge], cfg: ehr.HuntConfig) -> list[ehr.RankedEdge]:
+    return ehr._filter_ranked_edges(
+        ranked,
+        filter_net=cfg.filter_net,
+        filter_net_ip=cfg.filter_net_ip,
+        filter_domains=cfg.filter_domains,
+        filter_system_files=cfg.filter_system_files,
+        system_file_prefixes=cfg.system_file_prefixes,
+        filter_tmp_tempfile=cfg.filter_tmp_tempfile,
+        filter_cmd_noise=cfg.filter_cmd_noise,
+        cmd_noise_keywords=cfg.cmd_noise_keywords,
+        dedup_dst=cfg.dedup_dst,
+        max_per_etype=cfg.max_per_etype,
+    )
+
+
 @torch.no_grad()
 def _score_graphs_once(
     *,
@@ -140,16 +156,12 @@ def _score_graphs_once(
     device: torch.device,
     k: int,
     cfg: ehr.HuntConfig,
-    rarity_stats_path: str,
     rarity_normalize: str,
 ) -> tuple[list[int], list[list[ehr.RankedEdge]]]:
     """Compute and cache ranked edges for each graph once (model/explainer are constant)."""
     # We reuse ehr's filtering & topk to ensure identical behavior.
     ranked_all: list[list[ehr.RankedEdge]] = []
     y_true: list[int] = []
-
-    rarity = ehr.load_rarity_stats(rarity_stats_path)
-    scheme = str(rarity_normalize).strip() or str(getattr(rarity, "normalize", "none"))
 
     for gp in graph_paths:
         y = ehr._get_y(gp)
@@ -161,26 +173,12 @@ def _score_graphs_once(
             backbone=backbone,
             explainer=explainer,
             hetero_batch=data,
-            k=max(int(k) * 20, int(k)),
-        )
-        ranked = ehr._filter_ranked_edges(
-            ranked,
-            filter_net=cfg.filter_net,
-            filter_net_ip=cfg.filter_net_ip,
-            filter_domains=set(cfg.filter_domains),
-            filter_system_files=cfg.filter_system_files,
-            system_file_prefixes=cfg.system_file_prefixes,
-            filter_tmp_tempfile=cfg.filter_tmp_tempfile,
-            filter_cmd_noise=cfg.filter_cmd_noise,
-            cmd_noise_keywords=cfg.cmd_noise_keywords,
-            dedup_dst=cfg.dedup_dst,
-            max_per_etype=cfg.max_per_etype,
+            k=1_000_000,
         )
         ranked_all.append(ranked)
         y_true.append(int(y))
 
-    # Attach normalize scheme in case downstream expects it (not required, but keeps parity).
-    _ = scheme
+    _ = rarity_normalize
     return y_true, ranked_all
 
 
@@ -193,8 +191,8 @@ def main() -> None:
     ap.add_argument("--device", type=str, default="cpu", help="cpu|cuda")
     ap.add_argument("--seed", type=int, default=42)
 
-    ap.add_argument("--k", type=int, default=20, help="Top-K edges used to derive anomaly score per graph")
-    ap.add_argument("--ks", type=str, default="10,50,100", help="Graph-level P@K/R@K on rarity anomaly scores")
+    ap.add_argument("--k", type=int, default=20, help="Top-K suspicious edges used to score each graph")
+    ap.add_argument("--ks", type=str, default="10,50,100", help="Graph-level P@K/R@K on rarity suspicious scores")
 
     # Mirror hunt filters (keep defaults identical to eval_hunt_rarity.py)
     ap.add_argument("--filter-net", action="store_true", default=False)
@@ -259,15 +257,17 @@ def main() -> None:
         device=device,
         k=int(args.k),
         cfg=cfg,
-        rarity_stats_path=str(args.rarity_stats),
         rarity_normalize=str(args.rarity_normalize),
     )
     y_true = np.asarray(y_true_list, dtype=int)
     if len(y_true) == 0:
         raise SystemExit("No labeled graphs found (expected y in each *.graph.pt)")
 
-    # Baseline anomaly score: mean top-K explainer scores
-    base_scores = np.asarray([ehr._anomaly_score_from_ranked(r, k=int(args.k)) for r in ranked_all], dtype=float)
+    rarity = ehr.load_rarity_stats(str(args.rarity_stats))
+
+    # Baseline suspicious score: low explainer keep scores are more suspicious.
+    base_ranked_all = [_filter_with_config(ehr._to_suspicious_edges(r), cfg) for r in ranked_all]
+    base_scores = np.asarray([ehr._suspicious_score_from_ranked(r, k=int(args.k)) for r in base_ranked_all], dtype=float)
     auroc_base = _safe_auc(y_true, base_scores)
     auprc_base = _safe_auprc(y_true, base_scores)
 
@@ -279,17 +279,20 @@ def main() -> None:
     for lam, cap, etypes in itertools.product(lambdas, caps, etypes_grid):
         t1 = time.perf_counter()
         ranked_adj = [
-            ehr._apply_rarity(
-                r,
-                rarity_stats_path=str(args.rarity_stats),
-                rarity_lambda=float(lam),
-                rarity_idf_cap=float(cap),
-                rarity_etypes=set(etypes),
-                rarity_normalize=str(args.rarity_normalize),
+            _filter_with_config(
+                ehr._to_suspicious_edges(
+                    r,
+                    rarity=rarity,
+                    rarity_lambda=float(lam),
+                    rarity_idf_cap=float(cap),
+                    rarity_etypes=set(etypes),
+                    rarity_normalize=str(args.rarity_normalize),
+                ),
+                cfg,
             )
             for r in ranked_all
         ]
-        rarity_scores = np.asarray([ehr._anomaly_score_from_ranked(r, k=int(args.k)) for r in ranked_adj], dtype=float)
+        rarity_scores = np.asarray([ehr._suspicious_score_from_ranked(r, k=int(args.k)) for r in ranked_adj], dtype=float)
         auroc_r = _safe_auc(y_true, rarity_scores)
         auprc_r = _safe_auprc(y_true, rarity_scores)
         p_at, r_at = _precision_recall_at_k(y_true, rarity_scores, ks)
