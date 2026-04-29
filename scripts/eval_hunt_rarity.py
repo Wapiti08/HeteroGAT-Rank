@@ -9,7 +9,7 @@ from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
-from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 from torch_geometric.data import HeteroData
 
 # Ensure repo root importable when running as script.
@@ -212,6 +212,84 @@ def _precision_recall_at_k(y_true: np.ndarray, y_score: np.ndarray, ks: Iterable
     return out
 
 
+def _safe_div(num: float, den: float) -> float:
+    if den == 0.0:
+        return float("nan")
+    return float(num / den)
+
+
+def _binary_metrics_at_threshold(y_true: np.ndarray, y_score: np.ndarray, *, thr: float) -> dict[str, float]:
+    """Compute alerting-style metrics at a fixed suspicious-score threshold.
+
+    Convention: higher score => more suspicious => predicted positive.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_score = np.asarray(y_score, dtype=float)
+
+    # Treat NaN/Inf scores as "no alert" (pred negative).
+    finite = np.isfinite(y_score)
+    y_pred = np.zeros_like(y_true, dtype=int)
+    y_pred[finite] = (y_score[finite] >= float(thr)).astype(int)
+    tp = int(((y_true == 1) & (y_pred == 1)).sum())
+    fp = int(((y_true == 0) & (y_pred == 1)).sum())
+    tn = int(((y_true == 0) & (y_pred == 0)).sum())
+    fn = int(((y_true == 1) & (y_pred == 0)).sum())
+
+    precision = _safe_div(float(tp), float(tp + fp))
+    recall = _safe_div(float(tp), float(tp + fn))
+    f1 = float("nan")
+    if not np.isnan(precision) and not np.isnan(recall):
+        if (precision + recall) > 0.0:
+            f1 = float(2.0 * precision * recall / (precision + recall))
+        else:
+            # Define F1 as 0 when both precision and recall are 0.
+            f1 = 0.0
+    fpr = _safe_div(float(fp), float(fp + tn))
+
+    return {
+        "thr": float(thr),
+        "prec": float(precision),
+        "rec": float(recall),
+        "f1": float(f1),
+        "tp": float(tp),
+        "tn": float(tn),
+        "fp": float(fp),
+        "fn": float(fn),
+        "fpr": float(fpr),
+    }
+
+
+def _threshold_at_fpr(y_true: np.ndarray, y_score: np.ndarray, *, target_fpr: float) -> float:
+    """Pick a threshold on validation scores such that FPR ≲ target_fpr.
+
+    We use a robust quantile-based selector on NEGATIVE (benign) scores:
+    choose thr as the (1 - target_fpr) quantile of y_score[y_true==0].
+
+    This avoids roc_curve() edge cases (inf threshold, ties) on large/noisy datasets.
+    """
+    target = float(target_fpr)
+    target = max(0.0, min(1.0, target))
+
+    y_true = np.asarray(y_true, dtype=int)
+    y_score = np.asarray(y_score, dtype=float)
+
+    # Filter NaNs/Infs defensively.
+    m = np.isfinite(y_score) & np.isfinite(y_true.astype(float))
+    y_true = y_true[m]
+    y_score = y_score[m]
+
+    neg = y_score[y_true == 0]
+    if neg.size == 0:
+        return float("inf")
+
+    q = 1.0 - target
+    # For target_fpr==0, q==1.0 -> max(neg). That's the most conservative finite threshold.
+    thr = float(np.quantile(neg, q))
+
+    # Make threshold slightly above quantile to bias toward <= target FPR under ties.
+    return float(np.nextafter(thr, float("inf")))
+
+
 def _filter_with_config(ranked: list[RankedEdge], cfg: HuntConfig) -> list[RankedEdge]:
     return _filter_ranked_edges(
         ranked,
@@ -245,6 +323,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--graphs", type=str, nargs="+", default=[], help="Graph dirs or files; ignored if --test-list is set")
     ap.add_argument("--test-list", type=str, default="", help="Optional: path to *.graph.pt list for evaluation")
+    ap.add_argument("--val-list", type=str, default="", help="Optional: thresholds selected on this list, evaluated on --test-list")
     ap.add_argument("--backbone-ckpt", type=str, required=True)
     ap.add_argument("--explainer-ckpt", type=str, required=True)
     ap.add_argument("--device", type=str, default="cpu", help="cpu|cuda")
@@ -270,6 +349,7 @@ def main() -> None:
     ap.add_argument("--rarity-idf-cap", type=float, default=3.0)
     ap.add_argument("--rarity-etypes", type=str, default="PROC|CONNECT|NET,PROC|EXEC|CMD")
     ap.add_argument("--rarity-normalize", type=str, default="")
+    ap.add_argument("--op-fprs", type=str, default="0.01,0.05,0.10", help="3 operating points: target FPRs on val split")
     ap.add_argument("--latency-out", type=str, default="", help="Optional: write latency and metric summary JSON")
 
     args = ap.parse_args()
@@ -283,6 +363,9 @@ def main() -> None:
     graph_paths = [Path(x) for x in test_files] if test_files else _iter_graph_paths(args.graphs)
     if not graph_paths:
         raise SystemExit("No graphs found (provide --graphs or --test-list)")
+
+    val_files = _read_list(args.val_list)
+    val_paths = [Path(x) for x in val_files] if val_files else []
 
     cfg = HuntConfig(
         k=int(args.k),
@@ -301,20 +384,82 @@ def main() -> None:
     rarity_etypes = _as_set_csv(args.rarity_etypes)
     rarity = load_rarity_stats(str(args.rarity_stats))
 
+    def score_paths(paths: list[Path]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        y_true_: list[int] = []
+        score_base_: list[float] = []
+        score_rarity_: list[float] = []
+        node_counts_: list[int] = []
+        edge_counts_: list[int] = []
+
+        with torch.no_grad():
+            for gp in paths:
+                yv = _get_y(gp)
+                if yv is None or int(yv) not in (0, 1):
+                    continue
+                data = _load_graph(gp).to(device)
+
+                # Graph size stats (sum over node/edge types).
+                n_nodes = 0
+                for nt in data.node_types:
+                    try:
+                        n_nodes += int(data[nt].num_nodes or 0)
+                    except Exception:
+                        pass
+                n_edges = 0
+                for et in data.edge_types:
+                    try:
+                        ei = data[et].edge_index
+                        if ei is not None:
+                            n_edges += int(ei.size(1))
+                    except Exception:
+                        pass
+
+                ranked = topk_edges(backbone=backbone, explainer=explainer, hetero_batch=data, k=1_000_000)
+                base_ranked = _filter_with_config(_to_suspicious_edges(ranked), cfg)
+                base = _suspicious_score_from_ranked(base_ranked, k=cfg.k)
+
+                ranked_r = _filter_with_config(
+                    _to_suspicious_edges(
+                        ranked,
+                        rarity=rarity,
+                        rarity_lambda=float(args.rarity_lambda),
+                        rarity_idf_cap=float(args.rarity_idf_cap),
+                        rarity_etypes=rarity_etypes,
+                        rarity_normalize=str(args.rarity_normalize),
+                    ),
+                    cfg,
+                )
+                rar = _suspicious_score_from_ranked(ranked_r, k=cfg.k)
+
+                y_true_.append(int(yv))
+                score_base_.append(float(base))
+                score_rarity_.append(float(rar))
+                node_counts_.append(int(n_nodes))
+                edge_counts_.append(int(n_edges))
+
+        y_arr = np.asarray(y_true_, dtype=int)
+        sb_arr = np.asarray(score_base_, dtype=float)
+        sr_arr = np.asarray(score_rarity_, dtype=float)
+        nc_arr = np.asarray(node_counts_, dtype=float)
+        ec_arr = np.asarray(edge_counts_, dtype=float)
+        return y_arr, sb_arr, sr_arr, nc_arr, ec_arr
+
+    # Timing is best-effort and measured only on test split (for comparability with existing runs).
+    graph_latencies: list[float] = []
+
+    # Score test split (always).
     y_true: list[int] = []
     score_base: list[float] = []
     score_rarity: list[float] = []
     node_counts: list[int] = []
     edge_counts: list[int] = []
-    graph_latencies: list[float] = []
 
     with torch.no_grad():
         for gp in graph_paths:
             t_graph0 = time.perf_counter()
-            y = _get_y(gp)
-            if y is None or int(y) not in (0, 1):
+            yv = _get_y(gp)
+            if yv is None or int(yv) not in (0, 1):
                 continue
-
             data = _load_graph(gp).to(device)
 
             # Graph size stats (sum over node/edge types).
@@ -350,7 +495,7 @@ def main() -> None:
             )
             rar = _suspicious_score_from_ranked(ranked_r, k=cfg.k)
 
-            y_true.append(int(y))
+            y_true.append(int(yv))
             score_base.append(float(base))
             score_rarity.append(float(rar))
             node_counts.append(int(n_nodes))
@@ -385,6 +530,27 @@ def main() -> None:
     print(f"base_auroc={base_auc:.4f} base_auprc={base_auprc:.4f}")
     print(f"rarity_auroc={rar_auc:.4f} rarity_auprc={rar_auprc:.4f}")
 
+    # Sanity check: score distributions per class (helps debug sign/label issues).
+    def _cls_summary(name: str, scores: np.ndarray) -> None:
+        pos = scores[y == 1]
+        neg = scores[y == 0]
+
+        def _summ(arr: np.ndarray) -> str:
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                return "empty"
+            return (
+                f"mean={float(arr.mean()):.4g} "
+                f"p10={float(np.quantile(arr,0.1)):.4g} "
+                f"p50={float(np.quantile(arr,0.5)):.4g} "
+                f"p90={float(np.quantile(arr,0.9)):.4g}"
+            )
+
+        print(f"{name} score_by_class: y=1 {_summ(pos)} | y=0 {_summ(neg)}")
+
+    _cls_summary("base", sb)
+    _cls_summary("rarity", sr)
+
     ks = [int(x) for x in str(args.ks).split(",") if x.strip()]
     print("\n== graph-level ranking (by suspicious_score) ==")
     p_at: dict[str, dict[str, float]] = {"base": {}, "rarity": {}}
@@ -397,6 +563,38 @@ def main() -> None:
         p_at["rarity"][str(k)] = float(p)
         r_at["rarity"][str(k)] = float(r)
         print(f"rarity P@{k}={p:.4f} R@{k}={r:.4f}")
+
+    # Operating points: select thresholds on val split, evaluate on test split.
+    op_fprs = [float(x) for x in str(args.op_fprs).split(",") if x.strip()]
+    if op_fprs:
+        if val_paths:
+            yv, sbv, srv, _ncv, _ecv = score_paths(val_paths)
+            val_note = f"val_n={len(yv)}"
+        else:
+            # Fall back to selecting on test (not ideal, but still useful for quick sanity checks).
+            yv, sbv, srv = y, sb, sr
+            val_note = "val_list=NONE (thresholds selected on test; interpret cautiously)"
+
+        print("\n== operating points (thresholds selected on val; evaluated on test) ==")
+        if not val_paths:
+            print(val_note)
+
+        op_report: dict[str, dict[str, dict[str, float]]] = {"base": {}, "rarity": {}}
+        for tgt in op_fprs:
+            thr_b = _threshold_at_fpr(yv, sbv, target_fpr=tgt)
+            thr_r = _threshold_at_fpr(yv, srv, target_fpr=tgt)
+            mb = _binary_metrics_at_threshold(y, sb, thr=thr_b)
+            mr = _binary_metrics_at_threshold(y, sr, thr=thr_r)
+            op_report["base"][str(tgt)] = mb
+            op_report["rarity"][str(tgt)] = mr
+            print(
+                f"base  fpr<= {tgt:.3f}@val  thr={mb['thr']:.6g}  prec={mb['prec']:.4f}  rec={mb['rec']:.4f}  "
+                f"f1={mb['f1']:.4f}  tp={int(mb['tp'])}  fp={int(mb['fp'])}  tn={int(mb['tn'])}  fn={int(mb['fn'])}  fpr={mb['fpr']:.4f}"
+            )
+            print(
+                f"rarity fpr<= {tgt:.3f}@val  thr={mr['thr']:.6g}  prec={mr['prec']:.4f}  rec={mr['rec']:.4f}  "
+                f"f1={mr['f1']:.4f}  tp={int(mr['tp'])}  fp={int(mr['fp'])}  tn={int(mr['tn'])}  fn={int(mr['fn'])}  fpr={mr['fpr']:.4f}"
+            )
 
     if args.latency_out:
         out_path = Path(args.latency_out)
@@ -421,6 +619,11 @@ def main() -> None:
                 "rarity_auprc": float(rar_auprc),
                 "p_at_k": p_at,
                 "r_at_k": r_at,
+                "operating_points": {
+                    "op_fprs": op_fprs,
+                    "selected_on": "val" if bool(val_paths) else "test",
+                    "report": op_report if op_fprs else {},
+                },
             },
             "latency_seconds": {
                 "total": float(time.perf_counter() - t_total0),

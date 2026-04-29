@@ -449,7 +449,27 @@ python scripts/ablate_rarity_qut.py \
   --out-csv artifacts/rarity_ablation_qut.csv
 ```
 
+- Why those node/edge types
 
+```
+# for osp data
+python scripts/run_eval_hunt_rarity_osp.py \
+  --out-dir artifacts/ablate_osp_hunt_rarity \
+  --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json \
+  --device cuda
+
+# for qut data
+python scripts/run_eval_hunt_rarity_qut.py \
+  --out-dir artifacts/ablate_qut_hunt_rarity \
+  --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt \
+  --explainer-ckpt artifacts/checkpoints/pgexp_qut_full.pt \
+  --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json \
+  --device cuda
+
+
+```
 
 ## Distributed Configuration
 
