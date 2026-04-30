@@ -1,0 +1,31 @@
+{
+  "tag": "osp_hunt_rarity",
+  "created_ms": 1777475255637,
+  "val_list": "splits_full/osp_train.txt",
+  "test_list": "splits_full/osp_test.txt",
+  "backbone_ckpt": "artifacts/checkpoints/rgcn_osp_full.pt",
+  "explainer_ckpt": "artifacts/checkpoints/pgexp_osp_full.pt",
+  "rarity_stats": "artifacts/stats/benign_rarity_stats_osp_full.json",
+  "rarity_normalize": "osp",
+  "k": 20,
+  "device": "cuda",
+  "filter_args": "--filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8",
+  "op_fprs": "0.01,0.05,0.10",
+  "grid": {
+    "etypes": [
+      "NET_ONLY",
+      "CONNECT_ONLY",
+      "ALL"
+    ],
+    "lambdas": [
+      0.05,
+      0.1,
+      0.3
+    ],
+    "idf_caps": [
+      1.0,
+      2.0,
+      3.0
+    ]
+  }
+}

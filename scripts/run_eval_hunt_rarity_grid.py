@@ -290,10 +290,32 @@ def main() -> None:
             m = _parse_metrics(out)
 
             def opv(which: str, tgt: str, key: str) -> Any:
+                # Targets may appear as "0.01" or "0.010" depending on formatting.
                 try:
-                    return m["operating_points"][which][tgt][key]
+                    table = m["operating_points"][which]
                 except Exception:
                     return None
+                if tgt in table:
+                    return table[tgt].get(key)
+                try:
+                    tgt_f = float(tgt)
+                except Exception:
+                    return None
+                # Find closest parsed key by float value.
+                best_k = None
+                best_d = None
+                for kstr in table.keys():
+                    try:
+                        kf = float(kstr)
+                    except Exception:
+                        continue
+                    d = abs(kf - tgt_f)
+                    if best_d is None or d < best_d:
+                        best_d = d
+                        best_k = kstr
+                if best_k is None or best_d is None or best_d > 1e-9:
+                    return None
+                return table[best_k].get(key)
 
             row: list[Any] = [
                 spec.rarity_etypes,
