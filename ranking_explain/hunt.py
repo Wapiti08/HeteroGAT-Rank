@@ -48,6 +48,17 @@ def topk_edges(
     out = explainer.score_edges(backbone=backbone, hetero_batch=hetero_batch)
     data = out["data"]  # homogeneous Data
     scores = out["edge_score"]  # [E]
+    return ranked_edges_from_scores(hetero_batch=hetero_batch, data=data, scores=scores, k=k)
+
+
+def ranked_edges_from_scores(
+    *,
+    hetero_batch,
+    data,
+    scores: torch.Tensor,
+    k: int = 10,
+) -> List[RankedEdge]:
+    """Map homogeneous edge scores back to hetero node keys and return top-k edges."""
 
     node_type_names: List[str] = list(getattr(data, "_node_type_names", []))
     edge_type_names: List[Tuple[str, str, str]] = list(getattr(data, "_edge_type_names", []))

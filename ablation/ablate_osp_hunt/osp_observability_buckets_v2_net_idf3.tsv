@@ -1,0 +1,2 @@
+bucket	n	pos	neg	avg_behavior_edges	avg_family_richness	avg_edge_type_richness	auroc	auprc	P@10	R@10	P@50	R@50	P@100	R@100
+High-observability	1261	397	864	6829.56	3	7.70817	0.649441	0.427631	0	0	0	0	0	0

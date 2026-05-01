@@ -1,0 +1,4 @@
+bucket	n	pos	neg	min_bucket_field	max_bucket_field	avg_behavior_edges	avg_family_richness	avg_edge_type_richness	auroc	auprc	P@10	R@10	P@50	R@50	P@100	R@100
+Low-observability	421	225	196	695	1721	1185.53	3	7.28741	0.836893	0.791686	0.6	0.0266667	0.9	0.2	0.82	0.364444
+Medium-observability	420	172	248	1742	3447	2186.13	3	7.95	0.51668	0.533854	0	0	0	0	0.05	0.0290698
+High-observability	420	0	420	3468	150039	17130.4	3	7.8881	nan	nan	nan	nan	nan	nan	nan	nan

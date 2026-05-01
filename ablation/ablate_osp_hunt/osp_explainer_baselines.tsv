@@ -1,0 +1,5 @@
+method	auroc	auprc	P@10	R@10	P@50	R@50	P@100	R@100	thr@fpr0.01	prec@fpr0.01	rec@fpr0.01	f1@fpr0.01	thr@fpr0.05	prec@fpr0.05	rec@fpr0.05	f1@fpr0.05	thr@fpr0.1	prec@fpr0.1	rec@fpr0.1	f1@fpr0.1
+Random-K	0.0795492	0.185192	0	0	0	0	0	0	0.999294	0	0	nan	0.996207	0	0	nan	0.991287	0	0	nan
+Rarity-only	0.584599	0.385811	0	0	0	0	0.17	0.0428212	1.2	0	0	nan	1.2	0	0	nan	0.577996	0.37037	0.125945	0.18797
+Raw PGExplainer	0.602964	0.438403	0	0	0	0	0	0	-0.00236859	0	0	nan	-0.00508112	0	0	nan	-0.0094406	0	0	nan
+HetHunt+rarity	0.647878	0.438585	0	0	0	0	0	0	-0.00236859	0	0	nan	-0.00508112	0	0	nan	-0.0094406	0	0	nan

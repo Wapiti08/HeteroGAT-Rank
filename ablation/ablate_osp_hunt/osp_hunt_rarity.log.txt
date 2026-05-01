@@ -494,3 +494,290 @@ rarity fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  
 
 ## RUN 18/27
 CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes PROC|CONNECT|NET --rarity-lambda 0.3 --rarity-idf-cap 3.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=5009.042
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.5438 rarity_auprc=0.3990
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.1687 p10=-0.2129 p50=-0.1966 p90=-0.1255 | y=0 mean=-0.1481 p10=-0.1966 p50=-0.1966 p90=-0.009441
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+
+
+## RUN 19/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.05 --rarity-idf-cap 1.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4811.626
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.3140 rarity_auprc=0.3084
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.1568 p10=-0.2622 p50=-0.1637 p90=-0.116 | y=0 mean=-0.1197 p10=-0.1596 p50=-0.1511 p90=0.035
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.0476314  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=9  tn=855  fn=397  fpr=0.0104
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.0423274  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=42  tn=822  fn=397  fpr=0.0486
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.0342269  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 20/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.05 --rarity-idf-cap 2.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=5041.141
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.3184 rarity_auprc=0.2844
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.1249 p10=-0.2247 p50=-0.1312 p90=-0.08447 | y=0 mean=-0.07534 p10=-0.1198 p50=-0.1018 p90=0.08426
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.0976314  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=9  tn=855  fn=397  fpr=0.0104
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.0921631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=43  tn=821  fn=397  fpr=0.0498
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.0831666  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 21/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.05 --rarity-idf-cap 3.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4837.421
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.1166 rarity_auprc=0.2190
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.0995 p10=-0.1872 p50=-0.09865 p90=-0.06926 | y=0 mean=-0.03319 p10=-0.08514 p50=-0.05718 p90=0.1343
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.147631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=8  tn=856  fn=397  fpr=0.0093
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.142163  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=43  tn=821  fn=397  fpr=0.0498
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.133167  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 22/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.1 --rarity-idf-cap 1.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4950.393
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.3131 rarity_auprc=0.3082
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.1187 p10=-0.2215 p50=-0.1251 p90=-0.07742 | y=0 mean=-0.07204 p10=-0.1096 p50=-0.1011 p90=0.085
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.0976314  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=9  tn=855  fn=397  fpr=0.0104
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.0923274  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=42  tn=822  fn=397  fpr=0.0486
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.0842269  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 23/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.1 --rarity-idf-cap 2.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4883.646
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.1008 rarity_auprc=0.2171
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.05486 p10=-0.1465 p50=-0.06014 p90=-0.01438 | y=0 mean=0.01669 p10=-0.03739 p50=-0.008256 p90=0.1843
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.197631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=9  tn=855  fn=397  fpr=0.0104
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.192163  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=43  tn=821  fn=397  fpr=0.0498
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.183167  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 24/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.1 --rarity-idf-cap 3.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4746.699
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.0800 rarity_auprc=0.2149
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=-0.004135 p10=-0.0715 p50=0.004857 p90=0.01603 | y=0 mean=0.101 p10=0.02771 p50=0.08674 p90=0.2843
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.297631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=8  tn=856  fn=397  fpr=0.0093
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.292163  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=43  tn=821  fn=397  fpr=0.0498
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.283167  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 25/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.3 --rarity-idf-cap 1.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=5044.938
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.0710 rarity_auprc=0.2266
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=0.03432 p10=-0.05865 p50=0.03122 p90=0.07681 | y=0 mean=0.1185 p10=0.07681 p50=0.09243 p90=0.285
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.297631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=9  tn=855  fn=397  fpr=0.0104
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.292327  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=42  tn=822  fn=397  fpr=0.0486
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.284227  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 26/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.3 --rarity-idf-cap 2.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4945.140
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.0727 rarity_auprc=0.2148
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=0.226 p10=0.1663 p50=0.2262 p90=0.2659 | y=0 mean=0.3848 p10=0.2675 p50=0.3774 p90=0.5843
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.597631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=9  tn=855  fn=397  fpr=0.0104
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.592163  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=43  tn=821  fn=397  fpr=0.0498
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.583167  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
+
+## RUN 27/27
+CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --val-list splits_full/osp_train.txt --test-list splits_full/osp_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_osp_full.pt --explainer-ckpt artifacts/checkpoints/pgexp_osp_full.pt --rarity-stats artifacts/stats/benign_rarity_stats_osp_full.json --rarity-normalize osp --rarity-etypes  --rarity-lambda 0.3 --rarity-idf-cap 3.0 --k 20 --device cuda --op-fprs 0.01,0.05,0.10 --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+returncode=0 elapsed_s=4868.663
+eval_n=1261 pos=397 neg=864
+graph_size: nodes mean=3643.9 median=1597.0 p90=9586.0 | edges mean=6830.6 median=1929.0 p90=18300.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.5954 base_auprc=0.4387
+rarity_auroc=0.0879 rarity_auprc=0.2150
+base score_by_class: y=1 mean=-0.194 p10=-0.3029 p50=-0.2011 p90=-0.1532 | y=0 mean=-0.1661 p10=-0.2011 p50=-0.2011 p90=-0.009441
+rarity score_by_class: y=1 mean=0.3781 p10=0.3354 p50=0.3572 p90=0.4212 | y=0 mean=0.6378 p10=0.4001 p50=0.6624 p90=0.8843
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0000 R@100=0.0000
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0000 R@100=0.0000
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-0.00236859  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=10  tn=854  fn=397  fpr=0.0116
+rarity fpr<= 0.010@val  thr=0.897631  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=8  tn=856  fn=397  fpr=0.0093
+base  fpr<= 0.050@val  thr=-0.00508112  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=40  tn=824  fn=397  fpr=0.0463
+rarity fpr<= 0.050@val  thr=0.892163  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=43  tn=821  fn=397  fpr=0.0498
+base  fpr<= 0.100@val  thr=-0.00944059  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=85  tn=779  fn=397  fpr=0.0984
+rarity fpr<= 0.100@val  thr=0.883167  prec=0.0000  rec=0.0000  f1=nan  tp=0  fp=90  tn=774  fn=397  fpr=0.1042
+
