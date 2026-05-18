@@ -471,6 +471,41 @@ python scripts/run_eval_hunt_rarity_qut.py \
 
 ```
 
+- Usefulness Evaluation
+
+```
+python scripts/eval_analyst_usefulness.py generate \
+  --meta artifacts/ablate_qut_hunt_rarity/qut_hunt_rarity.meta.json \
+  --dataset qut \
+  --sample-size 50 \
+  --top-k 5 \
+  --seed 7 \
+  --rarity-lambda 0.5 \
+  --rarity-idf-cap 0 \
+  --rarity-etypes "" \
+  --out ablation/analyst_usefulness_qut.tsv
+
+python scripts/eval_analyst_usefulness.py generate \
+  --meta artifacts/ablate_osp_hunt_rarity/osp_hunt_rarity.meta.json \
+  --dataset osp \
+  --sample-size 50 \
+  --top-k 5 \
+  --seed 7 \
+  --rarity-lambda 0.3 \
+  --rarity-idf-cap 3 \
+  --rarity-etypes "PROC|DNS_QUERY|NET,PROC|RESOLVE|NET,PROC|CONNECT|NET" \
+  --out ablation/analyst_usefulness_osp.tsv
+
+python scripts/eval_analyst_usefulness.py summarize \
+  --annotations-in ablation/analyst_usefulness_qut.tsv \
+  --summary-out ablation/analyst_usefulness_qut_summary.tsv
+
+python scripts/eval_analyst_usefulness.py summarize \
+  --annotations-in ablation/analyst_usefulness_osp.tsv \
+  --summary-out ablation/analyst_usefulness_osp_summary.tsv
+
+```
+
 ## Distributed Configuration
 
 ```
