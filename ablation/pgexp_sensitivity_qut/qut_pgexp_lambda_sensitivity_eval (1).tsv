@@ -1,0 +1,10 @@
+sparsity_coef	entropy_coef	explainer_ckpt	train_returncode	eval_returncode	final_train_loss	base_auroc	base_auprc	rarity_auroc	rarity_auprc	base_f1@0.01	rarity_f1@0.01	base_f1@0.05	rarity_f1@0.05	base_f1@0.10	rarity_f1@0.10
+0.1	0.0	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.pt	0	0	0.2422	0.2136	0.3517	0.2136	0.3517	0.0	0.0	0.0117	0.0117	0.0209	0.0209
+0.1	0.01	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.01.pt	0	0	0.2415	0.211	0.3502	0.211	0.3502	0.0	0.0	0.0	0.0	0.0042	0.0042
+0.1	0.1	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.1.pt	0	0	0.2406	0.2162	0.352	0.2162	0.352	0.0	0.0	0.0	0.0	0.0084	0.0084
+1.0	0.0	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.pt	0	0	0.2425	0.2331	0.3583	0.2331	0.3583	0.0	0.0	0.0073	0.0073	0.0238	0.0238
+1.0	0.01	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.01.pt	0	0	0.2411	0.2533	0.3801	0.2533	0.3801	nan	nan	nan	nan	nan	nan
+1.0	0.1	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.1.pt	0	0	0.2441	0.2127	0.3508	0.2127	0.3508	0.0	0.0	0.0	0.0	0.0042	0.0042
+10.0	0.0	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.pt	0	0	0.2418	0.2304	0.3591	0.2304	0.3591	0.0015	0.0015	0.0132	0.0132	0.0279	0.0279
+10.0	0.01	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.01.pt	0	0	0.2427	0.2143	0.3526	0.2143	0.3526	0.0	0.0	0.0102	0.0102	0.0237	0.0237
+10.0	0.1	ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.1.pt	0	0	0.2437	0.3016	0.404	0.3016	0.404	nan	nan	nan	nan	nan	nan

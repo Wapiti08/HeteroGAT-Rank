@@ -1,0 +1,41 @@
+{
+  "tag": "qut_pgexp_lambda_sensitivity_eval",
+  "checkpoint_tag": "qut_pgexp_lambda_sensitivity",
+  "created_ms": 1779699405924,
+  "python": "/opt/miniconda3/bin/python",
+  "graphs": [
+    "artifacts/qut_all"
+  ],
+  "backbone_ckpt": "artifacts/checkpoints/rgcn_qut_full.pt",
+  "val_list": "splits_full/qut_train.txt",
+  "test_list": "splits_full/qut_test.txt",
+  "epochs": 5,
+  "batch_size": 4,
+  "lr": 0.001,
+  "temp": 1.0,
+  "sparsity_target": 0.05,
+  "grid": {
+    "sparsity_coefs": [
+      0.1,
+      1.0,
+      10.0
+    ],
+    "entropy_coefs": [
+      0.0,
+      0.01,
+      0.1
+    ]
+  },
+  "eval": {
+    "device": "cuda",
+    "k": 20,
+    "ks": "10,50,100",
+    "op_fprs": "0.01,0.05,0.10",
+    "rarity_stats": "artifacts/stats/benign_rarity_stats_qut_full.json",
+    "rarity_normalize": "qut",
+    "rarity_etypes": "",
+    "rarity_lambda": 0.0,
+    "rarity_idf_cap": 0.0,
+    "filter_args": "--filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8"
+  }
+}

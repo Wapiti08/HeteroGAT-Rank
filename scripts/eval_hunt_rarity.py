@@ -9,6 +9,7 @@ from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
+from torch import nn
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 from torch_geometric.data import HeteroData
 
@@ -19,7 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if REPO_ROOT.as_posix() not in sys.path:
     sys.path.insert(0, REPO_ROOT.as_posix())
 
-from model.rgcn import RGCNGraphClassifier  # noqa: E402
+from graph.canonical_features import load_canonical_graph  # noqa: E402
+from model.loaders import load_graph_classifier  # noqa: E402
 from ranking_explain.hunt import RankedEdge, topk_edges  # noqa: E402
 from ranking_explain.pgexplainer import PGExplainer  # noqa: E402
 from ranking_explain.rarity import RarityStats, etype_to_str, load_rarity_stats, normalize_dst_key  # noqa: E402
@@ -49,8 +51,7 @@ def _iter_graph_paths(graph_args: Sequence[str]) -> list[Path]:
 
 
 def _load_graph(path: Path) -> HeteroData:
-    obj = torch.load(path, map_location="cpu")
-    return HeteroData.from_dict(obj["data_dict"])
+    return load_canonical_graph(path, use_node_features=True)
 
 
 def _get_y(path: Path) -> Optional[int]:
@@ -67,18 +68,8 @@ def _get_y(path: Path) -> Optional[int]:
             return None
 
 
-def _load_backbone(path: str, *, device: torch.device) -> RGCNGraphClassifier:
-    ckpt = torch.load(path, map_location=device)
-    kwargs = ckpt.get("model_kwargs", {"hidden_dim": 64, "num_layers": 2, "dropout": 0.2, "num_classes": 2})
-    model = RGCNGraphClassifier(**kwargs).to(device)
-    schema = ckpt.get("schema", {})
-    nnt = int(schema.get("num_node_types", 0))
-    nr = int(schema.get("num_relations", 0))
-    if nnt > 0 and nr > 0:
-        model.materialize(num_node_types=nnt, num_relations=nr, device=device)
-    model.load_state_dict(ckpt["state_dict"])
-    model.eval()
-    return model
+def _load_backbone(path: str, *, device: torch.device) -> nn.Module:
+    return load_graph_classifier(path, device=device)
 
 
 def _load_explainer(path: str, *, device: torch.device) -> PGExplainer:

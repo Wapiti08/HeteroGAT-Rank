@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import RGCNConv, global_mean_pool
+
+from graph.canonical_features import CANONICAL_NODE_FEAT_DIM
+from model.node_encoder import CanonicalNodeEncoder
 
 
 class RGCNGraphClassifier(nn.Module):
@@ -33,6 +37,7 @@ class RGCNGraphClassifier(nn.Module):
         # We embed node_type ids (produced by `to_homogeneous(add_node_type=True)`).
         # Size is set lazily once we see max node_type in the first forward.
         self.node_type_emb: Optional[nn.Embedding] = None
+        self.node_encoder: Optional[CanonicalNodeEncoder] = None
 
         # RGCN layers are also created lazily because num_relations depends on edge types present.
         self.convs: nn.ModuleList = nn.ModuleList()
@@ -107,7 +112,15 @@ class RGCNGraphClassifier(nn.Module):
         for i, conv in enumerate(self.convs):
             self.convs[i] = conv.to(dev)
 
-        x = self.node_type_emb(node_type)
+        raw_x = getattr(data, "x", None)
+        if raw_x is not None and raw_x.numel() > 0:
+            if self.node_encoder is None:
+                self.node_encoder = CanonicalNodeEncoder(self.hidden_dim).to(dev)
+            elif next(self.node_encoder.parameters()).device != dev:
+                self.node_encoder = self.node_encoder.to(dev)
+            x = self.node_encoder(raw_x, node_type)
+        else:
+            x = self.node_type_emb(node_type)
 
         # If relations grow across batches, RGCNConv needs to be resized.
         # For baseline stability, rebuild conv stack when num_relations increases.
@@ -140,4 +153,44 @@ class RGCNGraphClassifier(nn.Module):
         if return_node_emb:
             return logits, x, data
         return logits
+
+
+def load_rgcn_graph_classifier(
+    path: Union[str, Path],
+    *,
+    device: torch.device,
+    weights_only: bool = False,
+) -> RGCNGraphClassifier:
+    """Load an R-GCN checkpoint saved by ``train_rgcn.py`` (old or new format)."""
+    ckpt = torch.load(Path(path), map_location=device, weights_only=weights_only)
+    kwargs = ckpt.get(
+        "model_kwargs",
+        {"hidden_dim": 64, "num_layers": 2, "dropout": 0.2, "num_classes": 2},
+    )
+    model = RGCNGraphClassifier(**kwargs).to(device)
+    schema = ckpt.get("schema", {})
+    nnt = int(schema.get("num_node_types", 0))
+    nr = int(schema.get("num_relations", 0))
+    if nnt > 0 and nr > 0:
+        model.materialize(num_node_types=nnt, num_relations=nr, device=device)
+
+    state = ckpt["state_dict"]
+    if any(k.startswith("node_encoder.") for k in state):
+        model.node_encoder = CanonicalNodeEncoder(model.hidden_dim).to(device)
+        model.node_encoder._ensure(
+            num_node_types=max(nnt, 1),
+            in_dim=CANONICAL_NODE_FEAT_DIM,
+            device=device,
+        )
+
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    if unexpected:
+        raise RuntimeError(f"Unexpected keys in R-GCN checkpoint: {unexpected}")
+    allowed_missing = {"node_encoder.node_type_emb.weight", "node_encoder.proj.weight", "node_encoder.proj.bias"}
+    extra_missing = [k for k in missing if k not in allowed_missing]
+    if extra_missing:
+        raise RuntimeError(f"Missing keys in R-GCN checkpoint: {extra_missing}")
+
+    model.eval()
+    return model
 

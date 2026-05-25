@@ -241,7 +241,7 @@ python comp/gnn_baselines/train_rgcn.py \
   --graphs artifacts/qut_all \
   --train-list splits_full/qut_train.txt \
   --test-list splits_full/qut_test.txt \
-  --epochs 5 \
+  --epochs 20 \
   --batch-size 8 \
   --ks 10,50,100 \
   --save-ckpt artifacts/checkpoints/rgcn_qut_full.pt
@@ -250,12 +250,16 @@ python comp/gnn_baselines/train_rgcn.py \
 Other canonical-graph GNN backbones (for paper baselines):
 
 ```bash
+# GAT / HAN / HGT use per-node canonical features (degree + node_key hash)
+# loaded at dataset time; class-weighted CE is on by default. Re-train all
+# baselines after pulling this change (old checkpoints expect type-only inputs).
+
 # GAT (homogeneous view with node_type/edge_type embeddings)
 python comp/gnn_baselines/train_gat.py \
   --graphs artifacts/qut_all \
   --train-list splits_full/qut_train.txt \
   --test-list splits_full/qut_test.txt \
-  --epochs 5 --batch-size 8 \
+  --epochs 20 --batch-size 8 \
   --ks 10,50,100 \
   --save-ckpt artifacts/checkpoints/gat_qut_full.pt
 
@@ -277,6 +281,21 @@ python comp/gnn_baselines/train_hgt.py \
   --ks 10,50,100 \
   --save-ckpt artifacts/checkpoints/hgt_qut_full.pt
 ```
+
+Efficiency table (train time, inference ms/graph, params + AUROC/F1):
+
+```bash
+python scripts/bench_qut_gnn_backbones.py \
+  --graphs artifacts/qut_all \
+  --train-list splits_full/qut_train.txt \
+  --test-list splits_full/qut_test.txt \
+  --backbone all \
+  --out ablation/qut_backbone_efficiency.tsv \
+  --latex
+```
+
+Defaults: R-GCN/GAT `epochs=20`, HAN/HGT `epochs=5` (override with `--epochs` or `--han-epochs` / `--hgt-epochs`).
+Inference timing is **forward-only** on the test split (`batch_size=1`); use `--infer-include-transfer` to include H2D copy.
 
 Note: `train_rgcn.py` only saves the backbone. To produce explanations you also need a PGExplainer checkpoint:
 

@@ -7,6 +7,8 @@ from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import HANConv, global_mean_pool
 
+from model.node_encoder import CanonicalNodeEncoder
+
 
 class HANGraphClassifier(nn.Module):
     """HAN baseline on canonical `HeteroData`.
@@ -28,6 +30,7 @@ class HANGraphClassifier(nn.Module):
         self.num_classes = num_classes
 
         self.node_type_emb: Optional[nn.Embedding] = None
+        self.node_encoder: Optional[CanonicalNodeEncoder] = None
         self.conv: Optional[HANConv] = None
         self._metadata = None
 
@@ -59,7 +62,7 @@ class HANGraphClassifier(nn.Module):
         self.to(device)
 
     def forward(self, hetero_batch) -> torch.Tensor:
-        metadata = hetero_batch.metadata()
+        metadata = self._metadata if self._metadata is not None else hetero_batch.metadata()
         dev = hetero_batch.edge_index_dict[next(iter(hetero_batch.edge_index_dict))].device if hetero_batch.edge_types else next(self.parameters()).device
         self._ensure_modules(metadata=metadata, device=dev)
         assert self.node_type_emb is not None and self.conv is not None
@@ -69,8 +72,18 @@ class HANGraphClassifier(nn.Module):
             n = int(hetero_batch[nt].num_nodes or 0)
             if n <= 0:
                 continue
-            x0 = self.node_type_emb.weight[i].unsqueeze(0).expand(n, -1)
-            x_dict[nt] = x0
+            store = hetero_batch[nt]
+            raw_x = getattr(store, "x", None)
+            if raw_x is not None and raw_x.numel() > 0:
+                if self.node_encoder is None:
+                    self.node_encoder = CanonicalNodeEncoder(self.hidden_dim).to(dev)
+                elif next(self.node_encoder.parameters()).device != dev:
+                    self.node_encoder = self.node_encoder.to(dev)
+                type_id = torch.full((n,), i, dtype=torch.long, device=dev)
+                x_dict[nt] = self.node_encoder(raw_x, type_id)
+            else:
+                x0 = self.node_type_emb.weight[i].unsqueeze(0).expand(n, -1)
+                x_dict[nt] = x0
 
         x_dict = self.conv(x_dict, hetero_batch.edge_index_dict)
         # HANConv may return None for node types that have no valid meta-path output

@@ -1,0 +1,345 @@
+PREFLIGHT CMD: /opt/miniconda3/bin/python -c import torch; import torch_geometric
+python_ok
+
+
+## RUN 1/9 sp=0.1 ent=0
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 0.1 --entropy 0.0 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.pt
+epoch 1 explainer_loss=0.2416
+epoch 2 explainer_loss=0.2414
+epoch 3 explainer_loss=0.2422
+epoch 4 explainer_loss=0.2419
+epoch 5 explainer_loss=0.2422
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2136 base_auprc=0.3517
+rarity_auroc=0.2136 rarity_auprc=0.3517
+base score_by_class: y=1 mean=-0.0003881 p10=-1.558e-07 p50=-2.186e-09 p90=-2.713e-10 | y=0 mean=-8.652e-05 p10=-2.038e-09 p50=-3.212e-10 p90=-1.324e-10
+rarity score_by_class: y=1 mean=-0.0003881 p10=-1.558e-07 p50=-2.186e-09 p90=-2.713e-10 | y=0 mean=-8.652e-05 p10=-2.038e-09 p50=-3.212e-10 p90=-1.324e-10
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0600 R@50=0.0023
+base P@100=0.0900 R@100=0.0069
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0600 R@50=0.0023
+rarity P@100=0.0900 R@100=0.0069
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-4.85083e-11  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=9  tn=1265  fn=1296  fpr=0.0071
+rarity fpr<= 0.010@val  thr=-4.85083e-11  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=9  tn=1265  fn=1296  fpr=0.0071
+base  fpr<= 0.050@val  thr=-9.98977e-11  prec=0.1127  rec=0.0062  f1=0.0117  tp=8  fp=63  tn=1211  fn=1288  fpr=0.0495
+rarity fpr<= 0.050@val  thr=-9.98977e-11  prec=0.1127  rec=0.0062  f1=0.0117  tp=8  fp=63  tn=1211  fn=1288  fpr=0.0495
+base  fpr<= 0.100@val  thr=-1.29116e-10  prec=0.1087  rec=0.0116  f1=0.0209  tp=15  fp=123  tn=1151  fn=1281  fpr=0.0965
+rarity fpr<= 0.100@val  thr=-1.29116e-10  prec=0.1087  rec=0.0116  f1=0.0209  tp=15  fp=123  tn=1151  fn=1281  fpr=0.0965
+
+eval_returncode=0
+
+## RUN 2/9 sp=0.1 ent=0.01
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 0.1 --entropy 0.01 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.01.pt
+epoch 1 explainer_loss=0.2419
+epoch 2 explainer_loss=0.2421
+epoch 3 explainer_loss=0.2427
+epoch 4 explainer_loss=0.2417
+epoch 5 explainer_loss=0.2415
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.01.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.01.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2110 base_auprc=0.3502
+rarity_auroc=0.2110 rarity_auprc=0.3502
+base score_by_class: y=1 mean=-2.811e-13 p10=-2.72e-17 p50=-1.12e-22 p90=-1.132e-26 | y=0 mean=-8.012e-15 p10=-9.804e-23 p50=-5.116e-26 p90=-2.29e-28
+rarity score_by_class: y=1 mean=-2.811e-13 p10=-2.72e-17 p50=-1.12e-22 p90=-1.132e-26 | y=0 mean=-8.012e-15 p10=-9.804e-23 p50=-5.116e-26 p90=-2.29e-28
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0100 R@100=0.0008
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0100 R@100=0.0008
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-2.69867e-30  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=7  tn=1267  fn=1296  fpr=0.0055
+rarity fpr<= 0.010@val  thr=-2.69867e-30  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=7  tn=1267  fn=1296  fpr=0.0055
+base  fpr<= 0.050@val  thr=-7.80011e-29  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=64  tn=1210  fn=1296  fpr=0.0502
+rarity fpr<= 0.050@val  thr=-7.80011e-29  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=64  tn=1210  fn=1296  fpr=0.0502
+base  fpr<= 0.100@val  thr=-2.16325e-28  prec=0.0236  rec=0.0023  f1=0.0042  tp=3  fp=124  tn=1150  fn=1293  fpr=0.0973
+rarity fpr<= 0.100@val  thr=-2.16325e-28  prec=0.0236  rec=0.0023  f1=0.0042  tp=3  fp=124  tn=1150  fn=1293  fpr=0.0973
+
+eval_returncode=0
+
+## RUN 3/9 sp=0.1 ent=0.1
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 0.1 --entropy 0.1 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.1.pt
+epoch 1 explainer_loss=0.2415
+epoch 2 explainer_loss=0.2418
+epoch 3 explainer_loss=0.2403
+epoch 4 explainer_loss=0.2422
+epoch 5 explainer_loss=0.2406
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.1.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp0.1_ent0.1.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2162 base_auprc=0.3520
+rarity_auroc=0.2162 rarity_auprc=0.3520
+base score_by_class: y=1 mean=-2.365e-14 p10=-5.742e-22 p50=-2.102e-28 p90=-1.139e-33 | y=0 mean=-9.525e-16 p10=-2.488e-28 p50=-1.491e-32 p90=-1.084e-35
+rarity score_by_class: y=1 mean=-2.365e-14 p10=-5.742e-22 p50=-2.102e-28 p90=-1.139e-33 | y=0 mean=-9.525e-16 p10=-2.488e-28 p50=-1.491e-32 p90=-1.084e-35
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0400 R@100=0.0031
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0400 R@100=0.0031
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-1.35911e-38  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=8  tn=1266  fn=1296  fpr=0.0063
+rarity fpr<= 0.010@val  thr=-1.35911e-38  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=8  tn=1266  fn=1296  fpr=0.0063
+base  fpr<= 0.050@val  thr=-2.69502e-36  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=60  tn=1214  fn=1296  fpr=0.0471
+rarity fpr<= 0.050@val  thr=-2.69502e-36  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=60  tn=1214  fn=1296  fpr=0.0471
+base  fpr<= 0.100@val  thr=-9.59634e-36  prec=0.0462  rec=0.0046  f1=0.0084  tp=6  fp=124  tn=1150  fn=1290  fpr=0.0973
+rarity fpr<= 0.100@val  thr=-9.59634e-36  prec=0.0462  rec=0.0046  f1=0.0084  tp=6  fp=124  tn=1150  fn=1290  fpr=0.0973
+
+eval_returncode=0
+
+## RUN 4/9 sp=1 ent=0
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 1.0 --entropy 0.0 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.pt
+epoch 1 explainer_loss=0.2412
+epoch 2 explainer_loss=0.2411
+epoch 3 explainer_loss=0.2425
+epoch 4 explainer_loss=0.2417
+epoch 5 explainer_loss=0.2425
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2331 base_auprc=0.3583
+rarity_auroc=0.2331 rarity_auprc=0.3583
+base score_by_class: y=1 mean=-0.0003174 p10=-2.558e-09 p50=-2.172e-11 p90=-4.673e-13 | y=0 mean=-7.666e-05 p10=-4.266e-11 p50=-1.098e-12 p90=-1.379e-13
+rarity score_by_class: y=1 mean=-0.0003174 p10=-2.558e-09 p50=-2.172e-11 p90=-4.673e-13 | y=0 mean=-7.666e-05 p10=-4.266e-11 p50=-1.098e-12 p90=-1.379e-13
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0600 R@50=0.0023
+base P@100=0.1000 R@100=0.0077
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0600 R@50=0.0023
+rarity P@100=0.1000 R@100=0.0077
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-3.66147e-14  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=6  tn=1268  fn=1296  fpr=0.0047
+rarity fpr<= 0.010@val  thr=-3.66147e-14  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=6  tn=1268  fn=1296  fpr=0.0047
+base  fpr<= 0.050@val  thr=-8.57306e-14  prec=0.0694  rec=0.0039  f1=0.0073  tp=5  fp=67  tn=1207  fn=1291  fpr=0.0526
+rarity fpr<= 0.050@val  thr=-8.57306e-14  prec=0.0694  rec=0.0039  f1=0.0073  tp=5  fp=67  tn=1207  fn=1291  fpr=0.0526
+base  fpr<= 0.100@val  thr=-1.27405e-13  prec=0.1278  rec=0.0131  f1=0.0238  tp=17  fp=116  tn=1158  fn=1279  fpr=0.0911
+rarity fpr<= 0.100@val  thr=-1.27405e-13  prec=0.1278  rec=0.0131  f1=0.0238  tp=17  fp=116  tn=1158  fn=1279  fpr=0.0911
+
+eval_returncode=0
+
+## RUN 5/9 sp=1 ent=0.01
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 1.0 --entropy 0.01 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.01.pt
+epoch 1 explainer_loss=0.2424
+epoch 2 explainer_loss=0.2415
+epoch 3 explainer_loss=0.2417
+epoch 4 explainer_loss=0.2424
+epoch 5 explainer_loss=0.2411
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.01.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.01.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2533 base_auprc=0.3801
+rarity_auroc=0.2533 rarity_auprc=0.3801
+base score_by_class: y=1 mean=-1.628e-10 p10=-1.538e-24 p50=-1.816e-37 p90=0 | y=0 mean=-8.978e-05 p10=-7.998e-39 p50=0 p90=0
+rarity score_by_class: y=1 mean=-1.628e-10 p10=-1.538e-24 p50=-1.816e-37 p90=0 | y=0 mean=-8.978e-05 p10=-7.998e-39 p50=0 p90=0
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.4000 R@10=0.0031
+base P@50=0.4400 R@50=0.0170
+base P@100=0.4200 R@100=0.0324
+rarity P@10=0.4000 R@10=0.0031
+rarity P@50=0.4400 R@50=0.0170
+rarity P@100=0.4200 R@100=0.0324
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+rarity fpr<= 0.010@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+base  fpr<= 0.050@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+rarity fpr<= 0.050@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+base  fpr<= 0.100@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+rarity fpr<= 0.100@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+
+eval_returncode=0
+
+## RUN 6/9 sp=1 ent=0.1
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 1.0 --entropy 0.1 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.1.pt
+epoch 1 explainer_loss=0.2447
+epoch 2 explainer_loss=0.2446
+epoch 3 explainer_loss=0.2446
+epoch 4 explainer_loss=0.2436
+epoch 5 explainer_loss=0.2441
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.1.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp1_ent0.1.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2127 base_auprc=0.3508
+rarity_auroc=0.2127 rarity_auprc=0.3508
+base score_by_class: y=1 mean=-1.869e-13 p10=-4.52e-19 p50=-3.627e-25 p90=-6.133e-30 | y=0 mean=-7.744e-15 p10=-2.904e-25 p50=-4.907e-29 p90=-8.039e-32
+rarity score_by_class: y=1 mean=-1.869e-13 p10=-4.52e-19 p50=-3.627e-25 p90=-6.133e-30 | y=0 mean=-7.744e-15 p10=-2.904e-25 p50=-4.907e-29 p90=-8.039e-32
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0000 R@50=0.0000
+base P@100=0.0200 R@100=0.0015
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0000 R@50=0.0000
+rarity P@100=0.0200 R@100=0.0015
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-6.05077e-34  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=8  tn=1266  fn=1296  fpr=0.0063
+rarity fpr<= 0.010@val  thr=-6.05077e-34  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=8  tn=1266  fn=1296  fpr=0.0063
+base  fpr<= 0.050@val  thr=-2.17507e-32  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=66  tn=1208  fn=1296  fpr=0.0518
+rarity fpr<= 0.050@val  thr=-2.17507e-32  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=66  tn=1208  fn=1296  fpr=0.0518
+base  fpr<= 0.100@val  thr=-7.44651e-32  prec=0.0242  rec=0.0023  f1=0.0042  tp=3  fp=121  tn=1153  fn=1293  fpr=0.0950
+rarity fpr<= 0.100@val  thr=-7.44651e-32  prec=0.0242  rec=0.0023  f1=0.0042  tp=3  fp=121  tn=1153  fn=1293  fpr=0.0950
+
+eval_returncode=0
+
+## RUN 7/9 sp=10 ent=0
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 10.0 --entropy 0.0 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.pt
+epoch 1 explainer_loss=0.2435
+epoch 2 explainer_loss=0.2413
+epoch 3 explainer_loss=0.2423
+epoch 4 explainer_loss=0.2420
+epoch 5 explainer_loss=0.2418
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2304 base_auprc=0.3591
+rarity_auroc=0.2304 rarity_auprc=0.3591
+base score_by_class: y=1 mean=-0.0004499 p10=-7.264e-09 p50=-8.779e-11 p90=-3.045e-12 | y=0 mean=-8.651e-05 p10=-7.178e-11 p50=-5.458e-12 p90=-8.811e-13
+rarity score_by_class: y=1 mean=-0.0004499 p10=-7.264e-09 p50=-8.779e-11 p90=-3.045e-12 | y=0 mean=-8.651e-05 p10=-7.178e-11 p50=-5.458e-12 p90=-8.811e-13
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.1000 R@10=0.0008
+base P@50=0.1200 R@50=0.0046
+base P@100=0.1200 R@100=0.0093
+rarity P@10=0.1000 R@10=0.0008
+rarity P@50=0.1200 R@50=0.0046
+rarity P@100=0.1200 R@100=0.0093
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-1.68468e-13  prec=0.1000  rec=0.0008  f1=0.0015  tp=1  fp=9  tn=1265  fn=1295  fpr=0.0071
+rarity fpr<= 0.010@val  thr=-1.68468e-13  prec=0.1000  rec=0.0008  f1=0.0015  tp=1  fp=9  tn=1265  fn=1295  fpr=0.0071
+base  fpr<= 0.050@val  thr=-4.993e-13  prec=0.1429  rec=0.0069  f1=0.0132  tp=9  fp=54  tn=1220  fn=1287  fpr=0.0424
+rarity fpr<= 0.050@val  thr=-4.993e-13  prec=0.1429  rec=0.0069  f1=0.0132  tp=9  fp=54  tn=1220  fn=1287  fpr=0.0424
+base  fpr<= 0.100@val  thr=-8.33125e-13  prec=0.1439  rec=0.0154  f1=0.0279  tp=20  fp=119  tn=1155  fn=1276  fpr=0.0934
+rarity fpr<= 0.100@val  thr=-8.33125e-13  prec=0.1439  rec=0.0154  f1=0.0279  tp=20  fp=119  tn=1155  fn=1276  fpr=0.0934
+
+eval_returncode=0
+
+## RUN 8/9 sp=10 ent=0.01
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 10.0 --entropy 0.01 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.01.pt
+epoch 1 explainer_loss=0.2437
+epoch 2 explainer_loss=0.2426
+epoch 3 explainer_loss=0.2420
+epoch 4 explainer_loss=0.2427
+epoch 5 explainer_loss=0.2427
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.01.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.01.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.2143 base_auprc=0.3526
+rarity_auroc=0.2143 rarity_auprc=0.3526
+base score_by_class: y=1 mean=-0.0003869 p10=-3.55e-10 p50=-3.922e-12 p90=-1.907e-13 | y=0 mean=-8.213e-05 p10=-3.826e-12 p50=-2.625e-13 p90=-6.792e-14
+rarity score_by_class: y=1 mean=-0.0003869 p10=-3.55e-10 p50=-3.922e-12 p90=-1.907e-13 | y=0 mean=-8.213e-05 p10=-3.826e-12 p50=-2.625e-13 p90=-6.792e-14
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.0000 R@10=0.0000
+base P@50=0.0800 R@50=0.0031
+base P@100=0.1100 R@100=0.0085
+rarity P@10=0.0000 R@10=0.0000
+rarity P@50=0.0800 R@50=0.0031
+rarity P@100=0.1100 R@100=0.0085
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=-2.13531e-14  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=10  tn=1264  fn=1296  fpr=0.0078
+rarity fpr<= 0.010@val  thr=-2.13531e-14  prec=0.0000  rec=0.0000  f1=0.0000  tp=0  fp=10  tn=1264  fn=1296  fpr=0.0078
+base  fpr<= 0.050@val  thr=-4.72508e-14  prec=0.0972  rec=0.0054  f1=0.0102  tp=7  fp=65  tn=1209  fn=1289  fpr=0.0510
+rarity fpr<= 0.050@val  thr=-4.72508e-14  prec=0.0972  rec=0.0054  f1=0.0102  tp=7  fp=65  tn=1209  fn=1289  fpr=0.0510
+base  fpr<= 0.100@val  thr=-6.62407e-14  prec=0.1206  rec=0.0131  f1=0.0237  tp=17  fp=124  tn=1150  fn=1279  fpr=0.0973
+rarity fpr<= 0.100@val  thr=-6.62407e-14  prec=0.1206  rec=0.0131  f1=0.0237  tp=17  fp=124  tn=1150  fn=1279  fpr=0.0973
+
+eval_returncode=0
+
+## RUN 9/9 sp=10 ent=0.1
+TRAIN CMD: /opt/miniconda3/bin/python ranking_explain/train_pgexplainer.py --graphs artifacts/qut_all --epochs 5 --batch-size 4 --lr 0.001 --temp 1.0 --sparsity 0.05 --sparsity-coef 10.0 --entropy 0.1 --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --save-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.1.pt
+epoch 1 explainer_loss=0.2474
+epoch 2 explainer_loss=0.2439
+epoch 3 explainer_loss=0.2432
+epoch 4 explainer_loss=0.2442
+epoch 5 explainer_loss=0.2437
+saved_ckpt=ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.1.pt
+
+train_returncode=0
+EVAL CMD: /opt/miniconda3/bin/python scripts/eval_hunt_rarity.py --test-list splits_full/qut_test.txt --backbone-ckpt artifacts/checkpoints/rgcn_qut_full.pt --explainer-ckpt ablation/pgexp_sensitivity_qut/checkpoints/qut_pgexp_lambda_sensitivity_sp10_ent0.1.pt --k 20 --ks 10,50,100 --device cuda --op-fprs 0.01,0.05,0.10 --rarity-lambda 0.0 --rarity-idf-cap 0.0 --rarity-etypes  --rarity-normalize qut --val-list splits_full/qut_train.txt --rarity-stats artifacts/stats/benign_rarity_stats_qut_full.json --filter-net --filter-net-ip --filter-system-files --filter-tmp-tempfile --filter-cmd-noise --dedup-dst --max-per-etype 8
+eval_n=2570 pos=1296 neg=1274
+graph_size: nodes mean=69.6 median=75.0 p90=82.0 | edges mean=81.0 median=86.0 p90=94.0
+
+== suspicious_score (mean top-k; higher means more suspicious) ==
+base_auroc=0.3016 base_auprc=0.4040
+rarity_auroc=0.3016 rarity_auprc=0.4040
+base score_by_class: y=1 mean=-4.487e-12 p10=-2.183e-30 p50=0 p90=0 | y=0 mean=-8.978e-05 p10=0 p50=0 p90=0
+rarity score_by_class: y=1 mean=-4.487e-12 p10=-2.183e-30 p50=0 p90=0 | y=0 mean=-8.978e-05 p10=0 p50=0 p90=0
+
+== graph-level ranking (by suspicious_score) ==
+base P@10=0.3000 R@10=0.0023
+base P@50=0.3800 R@50=0.0147
+base P@100=0.3800 R@100=0.0293
+rarity P@10=0.3000 R@10=0.0023
+rarity P@50=0.3800 R@50=0.0147
+rarity P@100=0.3800 R@100=0.0293
+
+== operating points (thresholds selected on val; evaluated on test) ==
+base  fpr<= 0.010@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+rarity fpr<= 0.010@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+base  fpr<= 0.050@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+rarity fpr<= 0.050@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+base  fpr<= 0.100@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+rarity fpr<= 0.100@val  thr=4.94066e-324  prec=nan  rec=0.0000  f1=nan  tp=0  fp=0  tn=1274  fn=1296  fpr=0.0000
+
+eval_returncode=0

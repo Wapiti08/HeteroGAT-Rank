@@ -7,6 +7,8 @@ from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv, global_mean_pool
 
+from model.node_encoder import CanonicalNodeEncoder
+
 
 class GATHomGraphClassifier(nn.Module):
     """Homogeneous GAT baseline on canonical graphs.
@@ -34,6 +36,7 @@ class GATHomGraphClassifier(nn.Module):
         self.edge_dim = edge_dim
 
         self.node_type_emb: Optional[nn.Embedding] = None
+        self.node_encoder: Optional[CanonicalNodeEncoder] = None
         self.edge_type_emb: Optional[nn.Embedding] = None
         self.convs: nn.ModuleList = nn.ModuleList()
 
@@ -75,7 +78,7 @@ class GATHomGraphClassifier(nn.Module):
                     heads=self.heads,
                     concat=False,
                     dropout=self.dropout,
-                    add_self_loops=False,
+                    add_self_loops=True,
                     edge_dim=self.edge_dim,
                 ).to(device)
             )
@@ -87,7 +90,7 @@ class GATHomGraphClassifier(nn.Module):
                         heads=self.heads,
                         concat=False,
                         dropout=self.dropout,
-                        add_self_loops=False,
+                        add_self_loops=True,
                         edge_dim=self.edge_dim,
                     ).to(device)
                 )
@@ -113,7 +116,15 @@ class GATHomGraphClassifier(nn.Module):
         self._ensure_tables(num_node_types=num_node_types, num_relations=num_relations, device=dev)
         assert self.node_type_emb is not None and self.edge_type_emb is not None
 
-        x = self.node_type_emb(node_type)
+        raw_x = getattr(data, "x", None)
+        if raw_x is not None and raw_x.numel() > 0:
+            if self.node_encoder is None:
+                self.node_encoder = CanonicalNodeEncoder(self.hidden_dim).to(dev)
+            elif next(self.node_encoder.parameters()).device != dev:
+                self.node_encoder = self.node_encoder.to(dev)
+            x = self.node_encoder(raw_x, node_type)
+        else:
+            x = self.node_type_emb(node_type)
         edge_attr = self.edge_type_emb(edge_type)
 
         for conv in self.convs:

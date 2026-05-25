@@ -13,7 +13,7 @@ if REPO_ROOT.as_posix() not in sys.path:
     sys.path.insert(0, REPO_ROOT.as_posix())
 
 from comp.gnn_baselines.dataset import CanonicalGraphDataset  # noqa: E402
-from model.rgcn import RGCNGraphClassifier  # noqa: E402
+from model.loaders import load_graph_classifier  # noqa: E402
 from ranking_explain.pgexplainer import PGExplainer  # noqa: E402
 
 
@@ -32,19 +32,12 @@ def main() -> None:
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ds = CanonicalGraphDataset(args.graphs)
+    ds = CanonicalGraphDataset(args.graphs, use_node_features=True)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True)
 
-    backbone = RGCNGraphClassifier(hidden_dim=64, num_layers=2, dropout=0.2, num_classes=2).to(device)
-    if args.backbone_ckpt:
-        ckpt = torch.load(args.backbone_ckpt, map_location=device)
-        schema = ckpt.get("schema", {})
-        nnt = int(schema.get("num_node_types", 0))
-        nr = int(schema.get("num_relations", 0))
-        if nnt > 0 and nr > 0:
-            backbone.materialize(num_node_types=nnt, num_relations=nr, device=device)
-        backbone.load_state_dict(ckpt["state_dict"])
-        backbone.eval()
+    if not args.backbone_ckpt:
+        raise SystemExit("--backbone-ckpt is required (train R-GCN first)")
+    backbone = load_graph_classifier(args.backbone_ckpt, device=device)
 
     explainer = PGExplainer(
         hidden_dim=64,

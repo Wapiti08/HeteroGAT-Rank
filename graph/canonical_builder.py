@@ -27,6 +27,7 @@ def build_heterodata_from_events(
     *,
     y: int | None = None,
     keep_raw_attrs: bool = True,
+    attach_node_features: bool = False,
 ) -> "HeteroData":
     """Convert canonical events to a `HeteroData`.
 
@@ -90,6 +91,11 @@ def build_heterodata_from_events(
         data[etype].edge_index = edge_index
         if keep_raw_attrs:
             data[etype].raw = edge_attrs[etype]
+
+    if attach_node_features:
+        from graph.canonical_features import attach_canonical_node_features
+
+        attach_canonical_node_features(data)
 
     return data
 

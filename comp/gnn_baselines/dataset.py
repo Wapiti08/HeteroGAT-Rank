@@ -8,6 +8,8 @@ import torch
 from torch.utils.data import Dataset
 from torch_geometric.data import HeteroData
 
+from graph.canonical_features import attach_canonical_node_features
+
 
 @dataclass(frozen=True)
 class GraphExample:
@@ -37,7 +39,14 @@ def _load_graph_pt(path: Path) -> Tuple[HeteroData, GraphExample]:
 class CanonicalGraphDataset(Dataset):
     """Loads canonical graphs saved by scripts into `HeteroData` objects."""
 
-    def __init__(self, graph_dirs: Sequence[str | Path] = (), graph_files: Sequence[str | Path] = ()):
+    def __init__(
+        self,
+        graph_dirs: Sequence[str | Path] = (),
+        graph_files: Sequence[str | Path] = (),
+        *,
+        use_node_features: bool = True,
+    ):
+        self.use_node_features = bool(use_node_features)
         self.paths: List[Path] = []
         for d in graph_dirs:
             p = Path(d)
@@ -59,5 +68,7 @@ class CanonicalGraphDataset(Dataset):
         # Use -1 for unknown labels (e.g., some QUT subsets).
         y = ex.y if ex.y is not None else -1
         data["y"] = torch.tensor([y], dtype=torch.long)
+        if self.use_node_features:
+            attach_canonical_node_features(data)
         return data
 
